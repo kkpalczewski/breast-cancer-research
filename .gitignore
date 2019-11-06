@@ -1,0 +1,14 @@
+# images extensions
+*.png
+*.jpg
+*.dcm
+*.dicom
+
+# python files
+__pycache__/
+
+# Jupyter Notebook
+*.ipynb_checkpoints
+
+# Labels
+*.xml
