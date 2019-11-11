@@ -12,3 +12,9 @@ __pycache__/
 
 # Labels
 *.xml
+
+# data folder
+/data
+
+#Pycharm folders
+/.idea
