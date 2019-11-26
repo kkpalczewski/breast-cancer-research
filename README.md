@@ -24,3 +24,11 @@ python /src/data_preparation/change_dicom_to_png.py <SOURCE_DICOM_DATA_FOLDER> <
 ```
 python /src/data_preparation/simplify_folder_paths_and_filenames.py <DATA_FOLDER> <SOURCE_METADATA> <DESTINATION_METADATA>
 ```
+4. NYU model and model developed in Master Thesis works on full images (not single findings). To adjust metadata one has to use script:
+```
+python /src/data_preparation/prepare_metadata_for_whole_images.py <SOURCE_METADATA> <DESTINATION_METADATA> <COLUMNS>(OPTIONAL)
+```
+5. New metadata are not divided into: train, validation and test part, to do this one has to use script:
+```
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+```
