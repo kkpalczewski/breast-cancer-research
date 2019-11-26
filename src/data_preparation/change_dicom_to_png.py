@@ -1,4 +1,3 @@
-import os
 import subprocess
 import shutil
 import time
@@ -8,7 +7,7 @@ import os
 
 def create_dir(dirName):
     """
-    Script for creating new directory
+    Create new directory
     :param dirName: Name of new directory to create
     :return: Name of created directory or None, if directory already exists
     """
@@ -42,7 +41,7 @@ def convert_dicom_to_png(source_file, dest_file):
 
 def change_dicom_to_png(source_folder, dest_folder):
     """
-    Script for copied .dcm files to .png with preserved file tree
+    Copy .dcm files to .png with preserved file tree
     :param source_folder: source folder with .dcm images
     :param dest_folder: dest folder with .png images
     :return: None
@@ -64,6 +63,12 @@ def change_dicom_to_png(source_folder, dest_folder):
             print("Iteration: {}".format(i))
 
 def change_extension_in_csv(source_csv, destination_csv):
+    """
+    Change extension, from .dcm to .png in metadata
+    :param source_csv: csv file with metadata with .dcm extension
+    :param destination_csv: new csv file with metadata with p.ng extension
+    :return: None
+    """
     source_csv_file = pd.read_csv(source_csv)
 
     fields_to_change = ['image file path', 'cropped image file path', 'ROI mask file path']

@@ -57,6 +57,16 @@ def make_complete_metadata(calc_mass_path_list, data_folder, new_metadata_path):
 
     all_metadata.to_csv(new_metadata_path)
 
+def make_split(x):
+    separator = "/"
+    return separator.join([x.split("/")[-2], x.split("/")[-1]])
+
+def change_master_file_path(metadata_path, new_metadata_path):
+    metadata = pd.read_csv(metadata_path, index_col=0)
+    metadata["image file path"] = metadata.apply(lambda x: make_split(x["image file path"]), axis=1)
+    metadata.to_csv(new_metadata_path, index=False)
+
+
 if __name__=="__main__":
     os.chdir("/home/krzysztof/Documents/Studia/Master_thesis/02_Source_code/breast-cancer-research")
     calc_test_path = "./data/labels/calc_case_description_test_set_processed.csv"
@@ -64,7 +74,11 @@ if __name__=="__main__":
     mass_test_path = "./data/labels/mass_case_description_test_set_processed.csv"
     mass_train_path = "./data/labels/mass_case_description_train_set_processed.csv"
     data_folder = "/media/krzysztof/ADATA_HD700/Breast_cancer_PNG/CBIS-DDSM/"
-    new_metadat_path = "/home/krzysztof/Documents/Studia/Master_thesis/02_Source_code/breast-cancer-research/data/labels/full_metadata.csv"
+    new_metadata_path = "/home/krzysztof/Documents/Studia/Master_thesis/02_Source_code/breast-cancer-research/data/labels/full_metadata.csv"
 
-    calc_mass_paht_list = [calc_test_path, calc_train_path, mass_test_path, mass_train_path]
-    make_complete_metadata(calc_mass_paht_list, data_folder, new_metadat_path)
+    #calc_mass_paht_list = [calc_test_path, calc_train_path, mass_test_path, mass_train_path]
+    #make_complete_metadata(calc_mass_paht_list, data_folder, new_metadat_path)
+
+    processed_metadata = "/home/krzysztof/Documents/Studia/Master_thesis/02_Source_code/breast-cancer-research/data/labels/full_metadata_without_master_folder.csv"
+
+    change_master_file_path(new_metadata_path, processed_metadata)
