@@ -69,29 +69,35 @@ def adjust_metadata(data_folder, source_metadata, destination_metadata):
     """
     metadata =pd.read_csv(source_metadata, index_col=0)
 
+    if not data_folder.endswith("/"):
+        data_folder = data_folder + "/"
+
     for idx, record in metadata.iterrows():
 
         full_img_path = os.path.join(data_folder, record["image file path"].split("/")[0], "full_image.png")
-        roi_path = os.path.join(data_folder, record["ROI mask file path"].split("/")[0], "mask.png")
-        cropped_path = os.path.join(data_folder, record["cropped image file path"].split("/")[0], "cropped_image.png")
+        full_roi_path = os.path.join(data_folder, record["ROI mask file path"].split("/")[0], "mask.png")
+        full_cropped_path = os.path.join(data_folder, record["cropped image file path"].split("/")[0], "cropped_image.png")
 
         #check image file path
         if os.path.isfile(full_img_path):
-            metadata.at[idx, "image file path"] = full_img_path
+            img_path = full_img_path.split(data_folder)[1]
+            metadata.at[idx, "image file path"] = img_path
         else:
             raise Exception("File {} doesn't exist".format(full_img_path))
 
         #check roi path
-        if os.path.isfile(roi_path):
+        if os.path.isfile(full_roi_path):
+            roi_path = full_roi_path.split(data_folder)[1]
             metadata.at[idx, "ROI mask file path"] = roi_path
         else:
-            raise Exception("ERROR: file {} doesn't exist".format(roi_path))
+            raise Exception("ERROR: file {} doesn't exist".format(full_roi_path))
 
         #check cropped path
-        if os.path.isfile(cropped_path):
+        if os.path.isfile(full_cropped_path):
+            cropped_path = full_cropped_path.split(data_folder)[1]
             metadata.at[idx, "cropped image file path"] = cropped_path
         else:
-            raise Exception("ERROR: file {} doesn't exist".format(cropped_path))
+            raise Exception("ERROR: file {} doesn't exist".format(full_cropped_path))
 
         if idx % 100 == 0:
             print("Changed {} metadata records".format(idx))
