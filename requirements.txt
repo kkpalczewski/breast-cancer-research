@@ -1,5 +1,5 @@
-torch=>1.2.0
-torchvision=>0.4.0
-imageio=>2.6.1
-numpy=>1.16.4
-pandas=>0.25.1
+torch>=1.2.0
+torchvision>=0.4.0
+imageio>=2.6.1
+numpy>=1.16.4
+pandas>=0.25.1
