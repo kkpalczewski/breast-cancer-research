@@ -30,5 +30,5 @@ python /src/data_preparation/prepare_metadata_for_whole_images.py <SOURCE_METADA
 ```
 5. New metadata are not divided into: train, validation and test part, to do this one has to use script:
 ```
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+python /src/data_preparation/create_train_val_test_split.py <SOURCE_METADATA> <DESTINATION_METADATA_FOLDER> <TRAIN_SIZE>(OPTIONAL) <VAL_SIZE>(OPTIONAL) <TEST_SIZE>(OPTIONAL) <RANDOM_STATE>(OPTIONAL) <VERBOSE>(OPTIONAL)
 ```
