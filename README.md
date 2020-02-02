@@ -28,7 +28,12 @@ python /src/data_preparation/simplify_folder_paths_and_filenames.py <DATA_FOLDER
 ```
 python /src/data_preparation/prepare_metadata_for_whole_images.py <SOURCE_METADATA> <DESTINATION_METADATA> <COLUMNS>(OPTIONAL)
 ```
-5. New metadata are not divided into: train, validation and test part, to do this one has to use script:
+5. Metadata are now summed up to single case, but there are multiple findings mask for single case. To merge all masks for single case, run:
+```
+python /src/data_preparation/merge_findings_mask.py <METADATA_PATH> <OLD_METADATA> <DATA_FODLER> <NEW_METADATA_PATH>
+```
+
+6. New metadata are not divided into: train, validation and test part, to do this one has to use script:
 ```
 python /src/data_preparation/create_train_val_test_split.py <SOURCE_METADATA> <DESTINATION_METADATA_FOLDER> <TRAIN_SIZE>(OPTIONAL) <VAL_SIZE>(OPTIONAL) <TEST_SIZE>(OPTIONAL) <RANDOM_STATE>(OPTIONAL) <VERBOSE>(OPTIONAL)
 ```
