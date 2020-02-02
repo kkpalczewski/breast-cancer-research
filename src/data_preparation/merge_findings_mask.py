@@ -80,7 +80,7 @@ def merge_masks(metadata_path, old_metadata, data_folder, new_metadata_path):
             print("Exception while saving {}, {}: {}".format(roi_malignant_path, roi_benign_path, e))
 
         new_metadata.at[idx, "ROI malignant path"] = os.path.join(record["image file path"].split("/")[0], "full_mask_malignant.png")
-        new_metadata.at[idx, "ROI benign path"] = os.path.join(record["image file path"].split("/")[0], "full_mask_malignant.png")
+        new_metadata.at[idx, "ROI benign path"] = os.path.join(record["image file path"].split("/")[0], "full_mask_benign.png")
 
         if idx % 100 == 0:
             print("Iteration: {}".format(idx))
