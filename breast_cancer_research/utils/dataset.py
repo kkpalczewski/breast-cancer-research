@@ -6,11 +6,12 @@ from torch.utils.data import Dataset
 import logging
 from typing import Optional, Mapping
 # basic
-from PIL import Image
 import os
 import pandas as pd
+from skimage import io
+import cv2
 
-class BasicDataset(Dataset):
+class UnetDataset(Dataset):
     def __init__(self, metadata: pd.DataFrame, root: str, sample: Optional[int] = None, scale: float = 0.05):
         self.metadata = metadata
         self.metadata = add_index(self.metadata)
@@ -38,21 +39,28 @@ class BasicDataset(Dataset):
         return self[0]['image'].numpy().shape
 
     @classmethod
-    def preprocess(cls, pil_img, scale: float):
-        w, h = pil_img.size
-        newW, newH = int(scale * w), int(scale * h)
-        assert newW > 0 and newH > 0, 'Scale is too small'
-        pil_img = pil_img.resize((newW, newH))
+    def preprocess(cls, img: np.ndarray, scale: float):
 
-        img_nd = np.array(pil_img)
+        shape_size = len(img.shape)
 
-        if len(img_nd.shape) == 2:
-            img_nd = np.expand_dims(img_nd, axis=2)
+        assert shape_size in [2], "Not implemented shape size: {}".format(shape_size)
+
+        if shape_size == 2:
+            h, w = img.shape
+
+        newH, newW = int(scale * h), int(scale * w)
+        assert newH > 0 and newW > 0, 'Scale is too small'
+
+        #img_nd = resize(img, (newH, newW))
+        img_resized = cv2.resize(img, (newW, newH))
+
+        img_normalized = cv2.normalize(img_resized, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+
+        if len(img_normalized.shape) == 2:
+            img_nd = np.expand_dims(img_normalized, axis=2)
 
         # HWC to CHW
         img_trans = img_nd.transpose((2, 0, 1))
-        if img_trans.max() > 1:
-            img_trans = img_trans / 255
 
         return img_trans
 
@@ -78,7 +86,8 @@ class BasicDataset(Dataset):
         #TODO: Add thresholding for masks
         record_file = self.metadata.iloc[i][label]
         record_path = os.path.join(self.root, record_file)
-        record = Image.open(record_path)
+        #record = Image.open(record_path)
+        record = cv2.imread(record_path, -cv2.IMREAD_ANYDEPTH)
         processed_record = self.preprocess(record, self.scale)
         return processed_record
 

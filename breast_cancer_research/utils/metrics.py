@@ -1,7 +1,7 @@
 import torch
 from torch.autograd import Function
 
-
+#TODO: check
 class DiceCoeff(Function):
     """Dice coeff for individual examples"""
 
