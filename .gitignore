@@ -20,4 +20,7 @@ __pycache__/
 /.idea
 
 #unused scripts
-/src/test_scripts_and_unused
+#TODO: delete after development
+/test_scripts_and_unused
+/runs
+/checkpoints

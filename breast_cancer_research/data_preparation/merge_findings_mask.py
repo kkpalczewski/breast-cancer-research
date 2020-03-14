@@ -106,19 +106,3 @@ def main():
 
 if __name__=="__main__":
     main()
-
-    # old_metadata_path = "/home/krzysztof/Documents/Studia/Master_thesis/02_Source_code/breast-cancer-research/data/labels/full_dataset.csv"
-    # data_folder = "/media/krzysztof/ADATA_HD700/Breast_cancer_PNG/CBIS-DDSM"
-    #
-    # test_metadata_path = "/home/krzysztof/Documents/Studia/Master_thesis/02_Source_code/breast-cancer-research/data/labels_for_whole_cases/test_set.csv"
-    # val_metadata_path = "/home/krzysztof/Documents/Studia/Master_thesis/02_Source_code/breast-cancer-research/data/labels_for_whole_cases/validation_set.csv"
-    # train_metadata_path = "/home/krzysztof/Documents/Studia/Master_thesis/02_Source_code/breast-cancer-research/data/labels_for_whole_cases/train_set.csv"
-    # metadata_path = [train_metadata_path, val_metadata_path, test_metadata_path]
-    #
-    # test_new_metadata_path = "/breast-cancer-research/data/labels_with_masks/test_set_with_masks.csv"
-    # val_new_metadata_path = "/breast-cancer-research/data/labels_with_masks/validation_set_with_masks.csv"
-    # train_new_metadata_path = "/breast-cancer-research/data/labels_with_masks/train_set_with_masks.csv"
-    # new_metadata_path = [train_new_metadata_path, val_new_metadata_path, test_new_metadata_path]
-    #
-    # for old_meta, new_meta in zip(metadata_path, new_metadata_path):
-    #     merge_masks(old_meta, old_metadata_path, data_folder, new_meta)
