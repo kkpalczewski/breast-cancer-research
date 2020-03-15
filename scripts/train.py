@@ -17,7 +17,7 @@ def main():
     root = "/home/kpalczew/CBIS_DDSM_2"
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     scale = 0.05
-    epochs = 10
+    epochs = 150
 
     # get dataset
     metadata_path_train = "/home/kpalczew/breast-cancer-research/data/labels_with_masks/train_set_with_masks.csv"
@@ -29,7 +29,11 @@ def main():
         str) == "Mass-Training_P_01194_LEFT_MLO"]
     dataset_train = UnetDataset(metadata_train, root, scale=scale)
 
-    for lr in [0.1, 0.5, 0.01]:
+    new_metadata_path = "sample.json"
+
+    metadata_train.to_csv(new_metadata_path)
+
+    for lr in [0.1, 0.05, 0.01]:
         torch.cuda.empty_cache()
         UnetModel = BreastCancerSegmentator(model=model, model_params=model_params, device=device)
         UnetModel.train(dataset_train=dataset_train,

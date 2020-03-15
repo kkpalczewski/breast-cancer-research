@@ -1,6 +1,6 @@
 # basic
 from abc import ABC, abstractmethod
-from typing import Mapping, ClassVar, Optional, List, Union
+from typing import Mapping, ClassVar, Optional, Dict, Union, Any
 import logging
 from tqdm import tqdm
 from collections import defaultdict
@@ -84,8 +84,6 @@ class BreastCancerSegmentator(BaseModel):
             assert dataset_train.scale == dataset_val.scale, f'Different scales for train and val dataset: {dataset_train.scale} ' \
                                                              f'and {dataset_val.scale}. It would cause val metrics irrelevant.'
 
-        self.writer = SummaryWriter(comment=f'LR_{lr}_BS_{batch_size}')
-
         logging.info(f'''Starting training:
             Epochs:          {epochs}
             Batch size:      {batch_size}
@@ -103,6 +101,8 @@ class BreastCancerSegmentator(BaseModel):
         # pos_weight = torch.ones(img_size)
         # check if this pos_weight is correct
         criterion = nn.BCEWithLogitsLoss()
+
+        self.writer = SummaryWriter(comment=f'LR_{lr}_BS_{batch_size}')
 
         for epoch in range(epochs):
             self._train_one_epoch(dataloader_train=dataloader_train,
@@ -122,35 +122,67 @@ class BreastCancerSegmentator(BaseModel):
             imgs = batch['image']
             imgs = imgs.to(device=self.device, dtype=torch.float32)
             break
+
         self.writer.add_graph(self.model, imgs)
         self.writer.close()
 
-    def predict(self, *, dataset_test: Union[Dataset, np.ndarray, torch.Tensor], scale_factor: float = 1, out_threshold: float = 0.5,
-                batch_size: int = 1) -> List:
+    def predict(self, *, dataset_test: Union[Dataset, DataLoader], scale_factor: float = 1, out_threshold: float = 0.5,
+                batch_size: int = 1, out_layer_name: str = "sigmoid", tensorboard_verbose: bool = True) -> Dict[
+        str, Any]:
         """
         Predict mask
         """
+
+        if out_layer_name == "sigmoid":
+            out_layer = torch.nn.Sigmoid()
+        else:
+            raise AttributeError("Not implemented out layer parameter: {}".format(out_layer_name))
+
+        # TODO: change dataset_test for imgs?
+        all_images = []
+        all_pred_masks_benign = []
+        all_pred_masks_malignant = []
+        all_truth_masks_benign = []
+        all_truth_masks_malignant = []
+
         with torch.no_grad():
-            if isinstance(dataset_test, Dataset):
-                dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=True, num_workers=8,
-                                             pin_memory=True)
-                all_pred_masks = []
+            if isinstance(dataset_test, Dataset) or isinstance(dataset_test, DataLoader):
+                if not isinstance(dataset_test, DataLoader):
+                    dataloader_test = DataLoader(dataset_test, batch_size=batch_size, shuffle=True, num_workers=8,
+                                                 pin_memory=True)
+                else:
+                    dataloader_test = dataset_test
                 for batch in dataloader_test:
                     imgs = batch['image']
-                    # true_masks = batch['mask']
-                    imgs = imgs.to(device=self.device, dtype=torch.float32)
-                    mask_pred = self.model(imgs)
-                    all_pred_masks.append(mask_pred)
-            elif isinstance(dataset_test, torch.Tensor) or isinstance(dataset_test, np.ndarray):
-                img = dataset_test
-                if not isinstance(img, torch.Tensor):
-                    img = torch.from_numpy(img).to(device=self.device, dtype=torch.float32)
-                mask_pred = self.model(img)
-                all_pred_masks = [mask_pred]
+                    true_masks = batch['mask']
+                    imgs_tensor = imgs.to(device=self.device, dtype=torch.float32)
+                    mask_pred = self.model(imgs_tensor)
+                    all_images.append(imgs)
 
-        return all_pred_masks
+                    gt_shape = true_masks.shape
+                    all_truth_masks_benign.append(true_masks[0][0].reshape(1, 1, gt_shape[2], gt_shape[3]))
+                    all_truth_masks_malignant.append(true_masks[0][1].reshape(1, 1, gt_shape[2], gt_shape[3]))
 
-    def evaluate(self, loader: DataLoader, threshold: float = 0.5):
+                    pred_shape = mask_pred.shape
+                    all_pred_masks_benign.append(out_layer(mask_pred[0][0]).reshape(1, 1, pred_shape[2], pred_shape[3]))
+                    all_pred_masks_malignant.append(
+                        out_layer(mask_pred[0][1]).reshape(1, 1, pred_shape[2], pred_shape[3]))
+
+        prediction_dict = dict(
+            all_images=all_images,
+            all_pred_masks_benign=all_pred_masks_benign,
+            all_pred_masks_malignant=all_pred_masks_malignant,
+            all_truth_masks_benign=all_truth_masks_benign,
+            all_truth_masks_malignant=all_truth_masks_malignant
+        )
+
+        if tensorboard_verbose is True:
+            self._check_tensorboard_writer()
+            self._tensorboard_predict(prediction_dict)
+
+        return prediction_dict
+
+    def evaluate(self, loader: DataLoader, threshold: float = 0.5, tensorboard_verbose: bool = True):
         """Evaluation without the densecrf with the dice coefficient"""
         n_val = len(loader.dataset)
 
@@ -178,6 +210,9 @@ class BreastCancerSegmentator(BaseModel):
 
         tot["benign"] = tot["benign"] / n_val
         tot["malignant"] = tot["malignant"] / n_val
+
+        if tensorboard_verbose is True:
+            self._tensorboard_evaluate(tot)
 
         return tot
 
@@ -208,14 +243,11 @@ class BreastCancerSegmentator(BaseModel):
 
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
                 pbar.update(imgs.shape[0])
-                if dataloader_val and epoch % 25 == 0:
-                    val_score = self.evaluate(dataloader_val)
-                    for batch in dataloader_val:
-                        preds = self.predict(batch)
-                    logging.info('Validation Dice Coeff: {}'.format(val_score))
-                    self.writer.add_scalar('Dice/test/benign', val_score['benign'], self.model_step)
-                    self.writer.add_scalar('Dice/test/malignant', val_score['malignant'], self.model_step)
-                    self.writer.add_images('Images/ground_truth', imgs, self.model_step)
+
+                if dataloader_val and epoch % 24 == 0:
+                    self._check_tensorboard_writer()
+                    self.evaluate(loader=dataloader_val, tensorboard_verbose=True)
+                    self.predict(dataset_test=dataloader_val, tensorboard_verbose=True)
 
     @counter_global_step
     def _train_single_batch(self, imgs, masks_ground_truth, optimizer, criterion):
@@ -238,3 +270,23 @@ class BreastCancerSegmentator(BaseModel):
         pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
         model_dict.update(pretrained_dict)
         self.model.load_state_dict(model_dict)
+
+    def _tensorboard_evaluate(self, val_score):
+        logging.info('Validation Dice Coeff: {}'.format(val_score))
+        self.writer.add_scalar('Dice/test/benign', val_score['benign'], self.model_step)
+        self.writer.add_scalar('Dice/test/malignant', val_score['malignant'], self.model_step)
+
+    def _tensorboard_predict(self, prediction_dict):
+        self.writer.add_images('Images/original_images', prediction_dict["all_images"][0], self.model_step)
+        self.writer.add_images('Images/benign/ground_truh', prediction_dict["all_truth_masks_benign"][0],
+                               self.model_step)
+        self.writer.add_images('Images/benign/predictions', prediction_dict["all_pred_masks_benign"][0],
+                               self.model_step)
+        self.writer.add_images('Images/malignant/ground_truh', prediction_dict["all_truth_masks_malignant"][0],
+                               self.model_step)
+        self.writer.add_images('Images/malignant/predictions', prediction_dict["all_pred_masks_malignant"][0],
+                               self.model_step)
+
+    def _check_tensorboard_writer(self):
+        if self.writer is None:
+            self.writer = SummaryWriter()
