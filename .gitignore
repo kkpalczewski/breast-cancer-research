@@ -21,6 +21,6 @@ __pycache__/
 
 #unused scripts
 #TODO: delete after development
-/test_scripts_and_unused
 /runs
 /checkpoints
+/tests

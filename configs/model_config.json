@@ -1,0 +1,40 @@
+{
+  "model_params": {
+    "n_channels": 1,
+    "n_classes": 3
+  },
+
+  "root": "/media/krzysztof/ADATA_HD700/Breast_cancer_PNG/CBIS-DDSM",
+  "device": "cuda",
+  "scale": 0.05,
+  "save_cp": false,
+
+  "criterion": {
+    "name": "dice",
+    "params": {
+      "weights": [1, 100, 1]
+    }
+  },
+
+  "scheduler": {
+    "name": "StepLR",
+    "params": {
+      "step_size": 8,
+      "gamma": 0.5
+    }
+  },
+
+  "optimizer": {
+    "name": "Adam",
+    "params": {
+      "lr": 0.01,
+      "weight_decay": 0
+    }
+  },
+
+  "cross_validation_params": {
+    "epochs": [100],
+    "lr": [0.01],
+    "weight_decay": [1e-8]
+  }
+}

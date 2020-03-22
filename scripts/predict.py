@@ -4,16 +4,17 @@ import json
 # ml
 import pandas as pd
 import torch
-from torch.utils.tensorboard import SummaryWriter
 # custom
-from breast_cancer_research.unet.model_facade import BreastCancerSegmentator
+from breast_cancer_research.unet.unet_facade import BreastCancerSegmentator
 from breast_cancer_research.unet.unet_model import UNet
-from breast_cancer_research.utils.dataset import UnetDataset
+from breast_cancer_research.unet.unet_dataset import UnetDataset
 
 
 def main():
     parser = argparse.ArgumentParser(description='Check model predictions')
     parser.add_argument('--config_path', type=str, help='path to model config')
+    parser.add_argument('--pretrained_dict_path', type=str, help='path to model pretrained dict')
+    parser.add_argument('--metadata_path', type=str, help='path to metadata')
     args = parser.parse_args()
 
     # read config
@@ -31,13 +32,13 @@ def main():
     if device == "cuda":
         assert torch.cuda.is_available(), "Cuda not available, change \"device\" in config: {}".format(args.config_path)
 
-    metadata_train = pd.read_csv(config["metadata_path"])
+    metadata_train = pd.read_csv(args.metadata_path)
     dataset_train = UnetDataset(metadata_train, root, scale=scale)
 
-    pretrained_model_path = config["pretrained_dict"]
-
+    pretrained_model_path = args.pretrained_dict_path
     unet_model = BreastCancerSegmentator(model=model, model_params=model_params, device=device,
                                          pretrained_model_path=pretrained_model_path)
+
     #predict and save to tensorbaord
     unet_model.predict(dataset_test=dataset_train, tensorboard_verbose=True)
     unet_model.writer.close() #TODO: make it more elegant

@@ -3,6 +3,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import List
+import numpy as np
 
 
 class DoubleConv(nn.Module):
@@ -73,3 +75,74 @@ class OutConv(nn.Module):
 
     def forward(self, x):
         return self.conv(x)
+
+
+class BinaryDiceLoss(nn.Module):
+    def __init__(self, activation_name: str = "softmax", weights: List[float] = (1, 1, 1), device: str = "cuda",
+                 reduction: str = "mean"):
+        super(BinaryDiceLoss, self).__init__()
+
+        self.activation_name = activation_name
+        self.device = device
+
+        if activation_name == "softmax":
+            self.activation = nn.Softmax(dim=0)
+        else:
+            raise NotImplementedError(f"Activation function {activation_name} not implemented")
+
+        # get weights
+        if not isinstance(weights, torch.Tensor):
+            weights = torch.tensor(weights, device=device, dtype=torch.float)
+        weights = torch.nn.functional.normalize(weights, dim=0)
+        self.weights = weights
+
+        # get reduction
+        self.reduction = reduction
+
+    def forward(self, preds, targets):
+
+        if not isinstance(targets, torch.Tensor):
+            targets = torch.tensor(targets, device=self.device)
+
+        assert targets.shape == preds.shape, f"Target's shape {targets.shape} and pred's shape {preds.shape} are not equal"
+        assert targets.device == preds.device == self.weights.device, f"Devices for tensor " \
+                                                                      f"targets: {targets.device}, " \
+                                                                      f"preds: {preds.device}, " \
+                                                                      f"weights: {self.weights.device} are not the same "
+        assert len(targets) == 1, f"Check targets shape"
+
+        targets = targets[0]
+        preds = preds[0]
+
+        assert len(targets) == len(
+            self.weights), f"Weights' len {len(self.weights)} anr target's len {len(targets)} are not equal"
+
+        dice_loss_with_weights = torch.zeros(1, dtype=torch.float, device=preds.device)
+
+        # activation func
+        preds = self.activation(preds)
+
+        for target, pred, weight in zip(targets, preds, self.weights):
+            dice_loss = self._single_dice_loss(target, pred)
+            dice_loss_with_weights += (torch.ones(1, device=self.device) - dice_loss) * weight
+
+        if self.reduction == "mean":
+            reduced_dice_loss = torch.sum(dice_loss_with_weights)
+        elif self.reduction == "sum":
+            reduced_dice_loss = torch.sum(dice_loss_with_weights)
+        else:
+            raise NotImplementedError(f"Reduction function {self.reduction} not implemented")
+
+        return reduced_dice_loss
+
+    def _single_dice_loss(self, target, pred):
+        target = target.contiguous().view(-1)
+        pred = pred.contiguous().view(-1)
+
+        target_pred_product = torch.sum(target * pred)
+        target_sum = torch.sum(target)
+        pred_sum = torch.sum(pred)
+
+        single_dice_loss = (2 * target_pred_product) / (target_sum + pred_sum)
+
+        return single_dice_loss
