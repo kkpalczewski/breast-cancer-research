@@ -72,17 +72,14 @@ class BreastCancerSegmentator(BaseModel):
               lr: float = 0.1,
               weight_decay: float = 1e-8,
               save_cp: bool = True,
-              scheduler_name: str = "StepLR",
               scheduler_params: Optional[dict] = None,
-              criterion_name: str = "BCE",
               criterion_params: Optional[dict] = None,
-              optimizer_name: str = "Adam",
               optimizer_params: Optional[dict] = None):
         # TODO: check num_workers
         # TODO: check pin_memory
         # FIXME: add custom method for Dataset to get same size images
 
-        #get mutable defaults
+        # get mutable defaults
         if scheduler_params is None: scheduler_params = {}
         if criterion_params is None: criterion_params = {}
         if optimizer_params is None: optimizer_params = {}
@@ -101,15 +98,15 @@ class BreastCancerSegmentator(BaseModel):
             assert dataset_train.scale == dataset_val.scale, f'Different scales for train and val dataset: {dataset_train.scale} ' \
                                                              f'and {dataset_val.scale}. It would cause val metrics irrelevant.'
 
-        #get scheduler, optimizer, criterion
-        optimizer = BreastCancerSegmentator._get_optimizer(self.model.parameters(), optimizer_name, optimizer_params)
-        lr_scheduler = BreastCancerSegmentator._get_scheduler(optimizer, scheduler_name, **scheduler_params)
-        criterion = BreastCancerSegmentator._get_criterion(criterion_name, criterion_params)
+        # get scheduler, optimizer, criterion
+        optimizer = BreastCancerSegmentator._get_optimizer(self.model.parameters(), optimizer_params)
+        lr_scheduler = BreastCancerSegmentator._get_scheduler(optimizer, scheduler_params)
+        criterion, out_layer_name = BreastCancerSegmentator._get_criterion(criterion_params)
 
-        #tensorboard dirs
+        # tensorboard dirs
+        lr = optimizer.param_groups[0]['lr']
         current_runs_dir, current_cp_dir = self._get_tensorboard_dir(dict(lr=lr, batch_size=batch_size, epochs=epochs))
-
-        self.writer = SummaryWriter(log_dir=current_runs_dir, comment='LR_{lr}_BS_{batch_size}_E_{epochs}')
+        self.writer = SummaryWriter(log_dir=current_runs_dir, comment=f'LR_{lr}_BS_{batch_size}_E_{epochs}')
 
         for epoch in tqdm(range(epochs), desc="Training epochs", total=epochs):
             epoch_loss = self._train_one_epoch(dataloader_train=dataloader_train,
@@ -118,12 +115,13 @@ class BreastCancerSegmentator(BaseModel):
                                                lr_scheduler=lr_scheduler)
 
             self._tensorboard_loss(epoch_loss)
-            self._tensorboard_hparams(dict(lr=lr))
+            self._tensorboard_hparams(dict(lr=optimizer.param_groups[0]['lr']))
 
             if dataloader_val and epoch % 24 == 0:
                 self._check_tensorboard_writer()
-                self.evaluate(loader=dataloader_val, tensorboard_verbose=True)
-                self.predict(dataset_test=dataloader_val, tensorboard_verbose=True)
+                self.evaluate(loader=dataloader_val)
+                self.predict(dataset_test=dataloader_val,
+                             out_layer_name=out_layer_name)
 
         if save_cp:
             mkdir(current_cp_dir)
@@ -132,7 +130,7 @@ class BreastCancerSegmentator(BaseModel):
                        model_dir)
             logging.info(f'Checkpoint {epoch + 1} saved !')
 
-        self._tensorboard_graph(dataloader_val) # get model graph
+        self._tensorboard_graph(dataloader_val)  # get model graph
         self.writer.close()
 
     def predict(self, *, dataset_test: Union[Dataset, DataLoader], scale_factor: float = 1, out_threshold: float = 0.5,
@@ -148,6 +146,8 @@ class BreastCancerSegmentator(BaseModel):
 
         if out_layer_name == "sigmoid":
             out_layer = torch.nn.Sigmoid()
+        elif out_layer_name == "softmax":
+            out_layer = nn.Softmax(dim=1)
         else:
             raise AttributeError("Not implemented out layer parameter: {}".format(out_layer_name))
 
@@ -167,6 +167,7 @@ class BreastCancerSegmentator(BaseModel):
                 true_masks = batch['mask']
                 imgs_tensor = imgs.to(device=self.device, dtype=torch.float32)
                 pred_masks = self.model(imgs_tensor)
+                pred_masks = out_layer(pred_masks)
                 prediction_dict['all_images'].append(imgs)
 
                 # [mask_benign, mask_malignent, mask_background]
@@ -225,8 +226,6 @@ class BreastCancerSegmentator(BaseModel):
         return tot
 
     def _train_one_epoch(self, *, dataloader_train: DataLoader, criterion, optimizer, lr_scheduler):
-        # TODO: check it
-
         self.model.train()
 
         epoch_loss = 0
@@ -325,41 +324,57 @@ class BreastCancerSegmentator(BaseModel):
         return run_dir, cp_dir
 
     @classmethod
-    def _get_criterion(cls, criterion_name: str = "BCE", criterion_params: Optional[Dict] = None):
+    def _get_criterion(cls, criterion_params: Optional[Dict] = None):
         if criterion_params is None:
-            criterion_params = {}
+            criterion_params = {"name": "BCE"}
+
+        criterion_name, criterion_hparams = BreastCancerSegmentator._get_names_hparams(criterion_params)
 
         if criterion_name == "BCE":
-            criterion = nn.BCEWithLogitsLoss(**criterion_params)
+            criterion = nn.BCEWithLogitsLoss(**criterion_hparams)
+            out_layer_name = "sigmoid"
         elif criterion_name == "dice":
-            criterion = BinaryDiceLoss(**criterion_params)
+            criterion = BinaryDiceLoss(**criterion_hparams)
+            out_layer_name = "softmax"
         else:
             raise NotImplementedError(f"Loss {criterion_name} not implemented")
 
-        return criterion
+        return criterion, out_layer_name
 
     @classmethod
-    def _get_optimizer(cls, params, optimizer_name: str = "Adam", optimizer_params: Optional[Dict] = None):
+    def _get_optimizer(cls, params, optimizer_params: Optional[Dict] = None):
         if optimizer_params is None:
-            optimizer_params = {}
+            optimizer_params = {"name": "Adam"}
+
+        optimizer_name, optimizer_hparams = BreastCancerSegmentator._get_names_hparams(optimizer_params)
 
         if optimizer_name == "Adam":
-            optimizer = torch.optim.Adam(params, **optimizer_params)
+            optimizer = torch.optim.Adam(params, **optimizer_hparams)
         elif optimizer_name == "RMSprop":
-            optimizer = optim.RMSprop(params, **optimizer_params)
+            optimizer = optim.RMSprop(params, **optimizer_hparams)
         else:
             raise NotImplementedError(f"Optimizer {optimizer_name} not implemented")
 
         return optimizer
 
     @classmethod
-    def _get_scheduler(cls, optimizer, scheduler_name: str = "StepLR", scheduler_params: Optional[Dict] = None):
+    def _get_scheduler(cls, optimizer, scheduler_params: Optional[Dict] = None):
         if scheduler_params is None:
-            scheduler_params = {}
+            scheduler_params = {"name": "StepLR"}
+
+        scheduler_name, scheduler_hparams = BreastCancerSegmentator._get_names_hparams(scheduler_params)
 
         if scheduler_name == "StepLR":
-            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, **scheduler_params)
+            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, **scheduler_hparams)
         else:
             raise NotImplementedError(f"Optimizer {scheduler_name} not implemented")
 
         return scheduler
+
+    @classmethod
+    def _get_names_hparams(cls, params):
+        params = params.copy()
+        name = params["name"]
+        params.pop("name")
+        hparams = params
+        return name, hparams

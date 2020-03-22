@@ -1,0 +1,27 @@
+{
+  "model_params": {
+    "n_channels": 1,
+    "n_classes": 3
+  },
+
+  "root": "/media/krzysztof/ADATA_HD700/Breast_cancer_PNG/CBIS-DDSM",
+  "device": "cuda",
+  "scale": 0.05,
+  "save_cp": false,
+  "epochs": 150,
+  "batch_size": 1,
+  "criterion_params": {
+    "name": "dice",
+    "weights": [10, 10, 1]
+  },
+  "scheduler_params": {
+    "name": "StepLR",
+    "step_size": 8,
+    "gamma": 0.5
+  },
+  "optimizer_params": {
+    "name": "Adam",
+    "lr": 0.01,
+    "weight_decay": 0
+  }
+}

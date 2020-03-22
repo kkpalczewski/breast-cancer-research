@@ -1,0 +1,6 @@
+{
+  "epochs": [10],
+  "optimizer_params": {
+    "lr": [0.01, 0.001]
+  }
+  }
