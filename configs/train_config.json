@@ -6,22 +6,22 @@
 
   "root": "/media/krzysztof/ADATA_HD700/Breast_cancer_PNG/CBIS-DDSM",
   "device": "cuda",
-  "scale": 0.05,
+  "scale": 0.1,
   "save_cp": false,
   "epochs": 150,
-  "batch_size": 1,
+  "batch_size": 4,
   "criterion_params": {
     "name": "dice",
-    "weights": [10, 10, 1]
+    "weights": [1, 1, 1]
   },
   "scheduler_params": {
     "name": "StepLR",
-    "step_size": 8,
-    "gamma": 0.5
+    "step_size": 10,
+    "gamma": 0.01
   },
   "optimizer_params": {
     "name": "Adam",
-    "lr": 0.01,
+    "lr": 0.0001,
     "weight_decay": 0
   }
 }

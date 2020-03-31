@@ -10,7 +10,6 @@ import os
 import pandas as pd
 import cv2
 
-
 class UnetDataset(Dataset):
     ORIGINAL_RATIO = 1.7
     ORIGINAL_HEIGHT = 2601
@@ -26,12 +25,14 @@ class UnetDataset(Dataset):
         self.ids = [*self.metadata.index.values]
         if sample == None:
             sample = len(self.ids)
-        self.ids = self.ids[0:sample]
+        self.ids = self.ids[:sample]
 
         # infer size
         self.img_size_ = self.img_size
 
-        logging.info(f'Creating dataset with {len(self.ids)} examples')
+        logging.info(f'Creating dataset with {len(self.ids)} examples.\n'
+                     f'Image height: {int(UnetDataset.ORIGINAL_HEIGHT*self.scale)}, '
+                     f'width: {int(UnetDataset.ORIGINAL_HEIGHT/UnetDataset.ORIGINAL_RATIO*self.scale)}')
 
     def __len__(self):
         return len(self.ids)
@@ -104,7 +105,6 @@ class UnetDataset(Dataset):
         prepare single image for training
         """
         # TODO: Add thresholding for masks
-        # TODO: WYciągnij img_name przed tą funkcję
 
         orientation = self.metadata.iloc[i]['left or right breast']
         processed_record = self.preprocess(image, self.scale, orientation)

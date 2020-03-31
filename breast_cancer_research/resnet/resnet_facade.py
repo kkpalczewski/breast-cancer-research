@@ -1,120 +1,255 @@
 from __future__ import division
 from __future__ import print_function
 
+from typing import Optional
+import os
 import torch
-from torch.utils.data import Dataset, DataLoader
-from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
-import torch.optim as optim
-from torch.optim import lr_scheduler
-from torchvision import models, transforms
+from torchvision import models
 from tqdm import tqdm
+import numpy as np
+from collections import defaultdict
+from torchvision import transforms
 
-from breast_cancer_research.unet.unet_facade import BaseModel
-from breast_cancer_research.utils.utils import elapsed_time
+from breast_cancer_research.base.base_model import BaseModel
+from breast_cancer_research.resnet.resnet_tensorboard import ResnetSummaryWriter
+from breast_cancer_research.utils.utils import elapsed_time, get_converted_timestamp
+from breast_cancer_research.utils.utils import counter_global_step
+
 
 
 class BreastCancerClassifier(BaseModel):
-    def __init__(self, model_name: str = "resnet", num_classes: int = 2,
-                 feature_extract: bool = False, use_pretrained: bool = True,
-                 device: torch.device = "cuda"):
-        self.num_classes = num_classes
-        self.model_name = model_name
+    TENSORBOARD_SUMMARY_DIR = "runs_resnet/"
+
+    def __init__(self,
+                 model_name: str = "resnet",
+                 num_classes: int = 2,
+                 feature_extract: bool = False,
+                 use_pretrained: bool = True,
+                 device: torch.device = "cuda",
+                 summary_mode: str = "tensorboard",
+                 pretrained_model_path: Optional[str] = None,
+                 cp_dir: str = "checkpoints/",
+                 run_dir: str = "runs/"):
+        # device
+        self.device = device
+
+        # writer
+        self.summary_mode = summary_mode
+        if summary_mode == "tensorboard":
+            self.cp_dir = cp_dir
+            self.run_dir = run_dir
+        self.writer = self._initialize_writer()
+
+        # global step vars
+        self._global_step = self.global_step
+        self.init_global_step = self.global_step
+        self._model_step = self.model_step
+
+        # model
         self.feature_extract = feature_extract
         self.use_pretrained = use_pretrained
-        self.device = device
-        self.model, self.input_size = self.initialize_model()
+        self.num_classes = num_classes
+        self.model_name = model_name
+        self.model, self.input_size = self._initialize_model()
+        if pretrained_model_path is not None:
+            self._load_pretrained_model(pretrained_model_path)
+        self.model.to(self.device)
+
+        # transforms
         self.transform = self._get_transform()
 
-    @elapsed_time
-    def train(self, dataloader_train, dataloader_test, *,
-              lr=0.001, momentum=0.9, num_epochs=25, is_inception=False):
+    @property
+    def global_step(self):
+        return self._train_one_epoch.counter
 
-        val_acc_history = []
+    @property
+    def model_step(self):
+        return self.global_step - self.init_global_step
+
+    @elapsed_time
+    def train(self,
+              dataloader_train,
+              dataloader_val,
+              *,
+              num_epochs=25,
+              is_inception=False,
+              batch_sample: Optional[int] = None,
+              save_cp: bool = True,
+              scheduler_params: Optional[dict] = None,
+              criterion_params: Optional[dict] = None,
+              optimizer_params: Optional[dict] = None,
+              evaluation_interval: int = 1):
+
+        #get mutable defaults
+        if scheduler_params is None:
+            scheduler_params = {"name": "StepLR", "step_size": 7, "gamma": 0.1}
+        if criterion_params is None:
+            criterion_params = {"name": "CrossEntropyLoss"}
+        if optimizer_params is None:
+            optimizer_params = {"name": "SGD", "lr": 0.001, "momentum": 0.9}
 
         # Observe that all parameters are being optimized
         params_to_update = self._get_params_to_update()
 
-        criterion = nn.CrossEntropyLoss()
-
-        optimizer = optim.SGD(params_to_update, lr=lr, momentum=momentum)
-
-        exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+        criterion = BreastCancerClassifier._get_criterion(criterion_params)
+        optimizer = BreastCancerClassifier._get_optimizer(params_to_update, optimizer_params)
+        lr_scheduler = BreastCancerClassifier._get_scheduler(optimizer, scheduler_params)
 
         self.model.train()
-
         for epoch in tqdm(range(num_epochs), total=num_epochs):
+            epoch_loss, epoch_acc = self._train_one_epoch(dataloader_train=dataloader_train,
+                                                          optimizer=optimizer,
+                                                          criterion=criterion,
+                                                          is_inception=is_inception,
+                                                          lr_scheduler=lr_scheduler,
+                                                          batch_sample=batch_sample,
+                                                          epoch=epoch)
 
-            running_loss = 0.0
-            running_corrects = 0
+            epoch_metrics = dict(epoch_loss=epoch_loss, epoch_acc=epoch_acc)
+            self.writer.loss(epoch_metrics, self.model_step)
 
-            # Iterate over data.
-            for inputs, labels in dataloader_train:
-                inputs = inputs.to(self.device)
-                labels = labels.to(self.device)
+            if dataloader_val and epoch % evaluation_interval == 0 and epoch != 0:
+                self.evaluate(dataloader_val, criterion)
+                self.predict(dataloader_val)
+        #last eval
+        self.evaluate(dataloader_val, criterion)
+        self.predict(dataloader_val)
 
-                #inputs = self.transform['train'](inputs)
-                # zero the parameter gradients
-                optimizer.zero_grad()
 
-                # forward
-                # track history if only in train
-                with torch.set_grad_enabled(self.feature_extract):
-                    # Get model outputs and calculate loss
-                    # Special case for inception because in training it has an auxiliary output. In train
-                    #   mode we calculate the loss by summing the final output and the auxiliary output
-                    #   but in testing we only consider the final output.
-                    if is_inception:
-                        # From https://discuss.pytorch.org/t/how-to-optimize-inception-model-with-auxiliary-classifiers/7958
-                        outputs, aux_outputs = self.model(inputs)
-                        loss1 = criterion(outputs, labels)
-                        loss2 = criterion(aux_outputs, labels)
-                        loss = loss1 + 0.4 * loss2
-                    else:
-                        outputs = self.model(inputs)
-                        loss = criterion(outputs, labels)
+    def evaluate(self, dataloader_val, criterion, batch_sample=50):
+        init_training_state = self.model.training
+        self.model.eval()
 
-                    _, preds = torch.max(outputs, 1)
+        metric_dict = defaultdict(list)
 
-                    # backward + optimize
-                    loss.requires_grad = True
+        for idx, (inputs, labels) in enumerate(dataloader_val):
+            inputs = inputs.to(self.device)
+            preds = self.model(inputs)
 
-                    loss.backward()
-                    optimizer.step()
+            preds = preds.detach().to("cpu").tolist()
+            preds = np.argmax(preds, axis=1)
+            labels = labels.to("cpu").tolist()
 
-                # statistics
-                running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels.data)
+            metric_dict['preds'].extend(preds)
+            metric_dict['labels'].extend(labels)
 
-                exp_lr_scheduler.step(epoch=epoch)
+            #TODO: remove after testing
+            if batch_sample and batch_sample == idx:
+                break
 
-            epoch_loss = running_loss / len(dataloader_train.dataset)
-            epoch_acc = running_corrects.double() / len(dataloader_train.dataset)
+        tot, support = criterion.evaluate(metric_dict)
 
-            print('Loss: {:.4f} Acc: {:.4f}'.format(epoch_loss, epoch_acc))
+        classes = dataloader_val.dataset.classes
 
-            if epoch % 10 == 0:
-                #TODO: add evaluation
-                pass
+        self.writer.evaluate(val_score_dict=tot,
+                             classes=classes,
+                             support=support,
+                             model_step=self.model_step)
 
-        print(val_acc_history)
+        # go back to training state, if model was in training state
+        if init_training_state is True:
+            self.model.train()
 
-    def evaluate(self):
-        pass
+        return tot
 
-    def predict(self):
-        pass
+    def predict(self, dataloader_val, num_images=5, batch_samples=100, resize_factor=4):
+        init_training_state = self.model.training
+        self.model.eval()
+
+        prediction_dict = defaultdict(lambda: defaultdict(list))
+        classes = dataloader_val.dataset.classes
+
+        for idx, (inputs, labels) in enumerate(dataloader_val):
+            inputs_tensor = inputs.to(self.device)
+            preds = self.model(inputs_tensor)
+
+            preds = preds.detach().to("cpu").tolist()
+            preds = np.argmax(preds, axis=1)
+            labels = labels.to("cpu").tolist()
+
+            for pred, label, input in zip(preds, labels, inputs):
+                pred_class = classes[pred]
+                label_class = classes[label]
+                match = (pred_class == label_class)
+
+                if match and len(prediction_dict['true_positive'][pred_class]) <= num_images:
+                    input = self._resize_tensor(input)
+                    prediction_dict['true_positive'][pred_class].append(input)
+                elif not match and len(prediction_dict['false_positive'][pred_class]) <= num_images:
+                    input = self._resize_tensor(input)
+                    prediction_dict['false_positive'][pred_class].append(input)
+
+            if idx == batch_samples:
+                break
+
+        self.writer.predict(prediction_dict=prediction_dict,
+                            model_step=self.model_step)
+
+        # go back to training state, if model was in training state
+        if init_training_state is True:
+            self.model.train()
 
     def set_parameter_requires_grad(self, feature_extracting, model_ft):
         if feature_extracting:
             for param in model_ft.parameters():
                 param.requires_grad = False
 
-    def initialize_model(self):
-        # Initialize these variables which will be set in this if statement. Each of these
-        #   variables is model specific.
-        model_ft = None
-        input_size = 0
+    @counter_global_step
+    def _train_one_epoch(self, dataloader_train, optimizer, criterion, is_inception, lr_scheduler, batch_sample,
+                         epoch):
+        running_loss = 0.0
+        running_corrects = 0
+        # Iterate over data.
+        for idx, (inputs, labels) in enumerate(dataloader_train):
+            inputs = inputs.to(self.device)
+            labels = labels.to(self.device)
+            loss, preds = self._train_single_batch(inputs, labels, optimizer, is_inception, criterion)
+
+            # statistics
+            running_loss += loss * dataloader_train.batch_size
+            running_corrects += np.sum(preds == labels.to("cpu").numpy())
+
+            lr_scheduler.step(epoch=epoch)
+
+            if batch_sample and batch_sample == idx:
+                break
+
+        epoch_loss = running_loss / idx*dataloader_train.batch_size
+        epoch_acc = running_corrects / idx*dataloader_train.batch_size
+
+        return epoch_loss, epoch_acc
+
+
+    def _train_single_batch(self, inputs, labels, optimizer, is_inception, criterion) -> (float, np.ndarray):
+        # zero the parameter gradients
+        optimizer.zero_grad()
+
+        # Get model outputs and calculate loss
+        # Special case for inception because in training it has an auxiliary output. In train
+        #   mode we calculate the loss by summing the final output and the auxiliary output
+        #   but in testing we only consider the final output.
+        if is_inception:
+            # From https://discuss.pytorch.org/t/how-to-optimize-inception-model-with-auxiliary-classifiers/7958
+            outputs, aux_outputs = self.model(inputs)
+            loss1 = criterion(outputs, labels)
+            loss2 = criterion(aux_outputs, labels)
+            loss = loss1 + 0.4 * loss2
+        else:
+            outputs = self.model(inputs)
+            loss = criterion(outputs, labels)
+
+        _, preds = torch.max(outputs, 1)
+
+        loss.backward()
+        optimizer.step()
+
+        loss = loss.item()
+        preds = preds.to("cpu").numpy()
+
+        return loss, preds
+
+    def _initialize_model(self):
 
         if self.model_name == "resnet":
             """ Resnet18
@@ -176,10 +311,20 @@ class BreastCancerClassifier(BaseModel):
             input_size = 299
 
         else:
-            print("Invalid model name, exiting...")
-            exit()
+            raise ValueError(f"Invalid model name {self.model_name}")
 
         return model_ft, input_size
+
+    def _initialize_writer(self):
+        if self.summary_mode == "tensorboard":
+            current_runs_dir, current_cp_dir = self._get_tensorboard_dir()
+            writer = ResnetSummaryWriter(log_dir=current_runs_dir)
+        elif self.summary_mode == "neptune":
+            raise NotImplementedError
+        else:
+            raise ValueError(f"Summary mode {self.summary_mode} not implemented")
+
+        return writer
 
     def _get_transform(self):
         data_transforms = {
@@ -202,32 +347,37 @@ class BreastCancerClassifier(BaseModel):
         #  that we have just initialized, i.e. the parameters with requires_grad
         #  is True.
         self.params_to_update = self.model.parameters()
-        print("Params to learn:")
+        # print("Params to learn:")
         if self.feature_extract:
             self.params_to_update = []
             for name, param in self.model.named_parameters():
                 if param.requires_grad == True:
                     self.params_to_update.append(param)
-                    print("\t", name)
+                    # print("\t", name)
         else:
             for name, param in self.model.named_parameters():
                 if param.requires_grad == True:
-                    print("\t", name)
+                    # print("\t", name)
+                    pass
 
         return self.params_to_update
 
+    def _load_pretrained_model(self, pretrained_model_path):
+        raise NotImplementedError
 
-def main():
-    # Initialize the model for this run
-    model_ft, input_size = BreastCancerClassifier()
+    def _get_tensorboard_dir(self):
+        converted_timestamp = get_converted_timestamp()
 
-    # Setup the loss fxn
-    criterion = nn.CrossEntropyLoss()
+        run_dir = os.path.join(self.run_dir, converted_timestamp)
+        cp_dir = os.path.join(self.cp_dir, converted_timestamp)
 
-    # Train and evaluate
-    model_ft, hist = train_model(model_ft, dataloaders_dict, criterion, optimizer_ft, num_epochs=num_epochs,
-                                 is_inception=(model_name == "inception"))
+        return run_dir, cp_dir
 
+    def _resize_tensor(self, img):
+        transform = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize(128),
+            transforms.ToTensor()
+        ])
 
-if __name__ == "__main__":
-    main()
+        return transform(img)
