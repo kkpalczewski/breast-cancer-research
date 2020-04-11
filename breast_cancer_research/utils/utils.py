@@ -19,8 +19,6 @@ def get_converted_timestamp():
     converted_timestamp = datetime.fromtimestamp(timestamp).strftime('%Y%m%d_%H%M%S')
     return converted_timestamp
 
-
-# TODO: change so that there could be multiple trainings on the same model
 def counter_global_step(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -29,7 +27,6 @@ def counter_global_step(func):
 
     wrapper.counter = 0  # executed only once in decorator definition time
     return wrapper
-
 
 def elapsed_time(func):
     @wraps(func)
@@ -45,6 +42,20 @@ def elapsed_time(func):
 
     return wrapper
 
+def prevent_oom_error(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            result = func(*args, **kwargs)
+        except RuntimeError:
+            wrapper.oom_errors_count += 1
+            print(f"RuntimeError no. {wrapper.oom_errors_count} in func {func.__name__} -> probably CUDA OOM in function")
+            result = None
+
+        return result
+
+    wrapper.oom_errors_count = 0
+    return wrapper
 
 def unpickle(file):
     import pickle

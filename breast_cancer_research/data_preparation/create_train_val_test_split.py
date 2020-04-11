@@ -98,7 +98,7 @@ def main():
     parser.add_argument('val_size', help='size of validation set', const=0.2)
     parser.add_argument('test_size', help='size of test set', const=0.2)
     parser.add_argument('random_state', help='random state', const=42)
-    parser.add_argument('verbose', help='verbosty', const=False)
+    parser.add_argument('verbose', help='verbosity', const=False)
 
     args = parser.parse_args()
 

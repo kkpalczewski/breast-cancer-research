@@ -1,0 +1,41 @@
+{
+  "inference_params": {
+    "model_params": {
+      "model_name": "resnet",
+      "feature_extract": false,
+      "num_classes": 2,
+      "use_pretrained": true,
+      "pretrained_model_path": null
+    },
+    "device": "cuda"
+  },
+  "dataset_params": {
+    "root_img": "/home/kpalczew/CBIS_DDSM_2",
+    "root_mask": "/home/kpalczew/CBIS_DDSM_2",
+    "classes": ["benign_finding", "malignant_finding"],
+    "scale": 0.3,
+    "batch_size": 4,
+    "unet_config": null,
+    "sample": 10
+  },
+  "training_params": {
+    "save_cp": true,
+    "evaluate_train": true,
+    "epochs": 50,
+    "batch_sample": 200,
+    "evaluation_interval": 10,
+    "criterion_params": {},
+    "scheduler_params": {
+      "name": "StepLR",
+      "step_size": 10,
+      "gamma": 0.5
+    },
+    "optimizer_params": {
+      "name": "SGD",
+      "lr": 0.005
+    }
+  },
+  "cross_val_params": {
+    "epochs": [100]
+  }
+}

@@ -10,3 +10,4 @@ pandas
 tqdm
 opencv
 imageio
+sklearn

@@ -1,36 +1,29 @@
 from __future__ import division
 from __future__ import print_function
 
-from typing import Optional
+from typing import Optional, Dict, Any
 import os
 import torch
 import torch.nn as nn
 from torchvision import models
-from tqdm import tqdm
+from tqdm import trange
 import numpy as np
 from collections import defaultdict
 from torchvision import transforms
+import logging
 
 from breast_cancer_research.base.base_model import BaseModel
 from breast_cancer_research.resnet.resnet_tensorboard import ResnetSummaryWriter
-from breast_cancer_research.utils.utils import elapsed_time, get_converted_timestamp
-from breast_cancer_research.utils.utils import counter_global_step
-
+from breast_cancer_research.utils.utils import elapsed_time, get_converted_timestamp, counter_global_step, mkdir
 
 
 class BreastCancerClassifier(BaseModel):
-    TENSORBOARD_SUMMARY_DIR = "runs_resnet/"
-
     def __init__(self,
-                 model_name: str = "resnet",
-                 num_classes: int = 2,
-                 feature_extract: bool = False,
-                 use_pretrained: bool = True,
+                 model_params: Dict[str, Any],
                  device: torch.device = "cuda",
                  summary_mode: str = "tensorboard",
-                 pretrained_model_path: Optional[str] = None,
-                 cp_dir: str = "checkpoints/",
-                 run_dir: str = "runs/"):
+                 cp_dir: str = "checkpoints_resnet/",
+                 run_dir: str = "runs_resnet/"):
         # device
         self.device = device
 
@@ -47,13 +40,8 @@ class BreastCancerClassifier(BaseModel):
         self._model_step = self.model_step
 
         # model
-        self.feature_extract = feature_extract
-        self.use_pretrained = use_pretrained
-        self.num_classes = num_classes
-        self.model_name = model_name
-        self.model, self.input_size = self._initialize_model()
-        if pretrained_model_path is not None:
-            self._load_pretrained_model(pretrained_model_path)
+        self.model, self.input_size, self.feature_extract = self._initialize_model(**model_params)
+
         self.model.to(self.device)
 
         # transforms
@@ -72,32 +60,34 @@ class BreastCancerClassifier(BaseModel):
               dataloader_train,
               dataloader_val,
               *,
-              num_epochs=25,
+              epochs=25,
               is_inception=False,
               batch_sample: Optional[int] = None,
               save_cp: bool = True,
               scheduler_params: Optional[dict] = None,
               criterion_params: Optional[dict] = None,
               optimizer_params: Optional[dict] = None,
-              evaluation_interval: int = 1):
+              evaluation_interval: int = 1,
+              evaluate_train: bool = True,
+              eval_mask_threshold: float = 0.5):
 
-        #get mutable defaults
-        if scheduler_params is None:
+        # get mutable defaults
+        if scheduler_params is None or scheduler_params == {}:
             scheduler_params = {"name": "StepLR", "step_size": 7, "gamma": 0.1}
-        if criterion_params is None:
+        if criterion_params is None or criterion_params == {}:
             criterion_params = {"name": "CrossEntropyLoss"}
-        if optimizer_params is None:
+        if optimizer_params is None or optimizer_params == {}:
             optimizer_params = {"name": "SGD", "lr": 0.001, "momentum": 0.9}
 
         # Observe that all parameters are being optimized
         params_to_update = self._get_params_to_update()
 
-        criterion = BreastCancerClassifier._get_criterion(criterion_params)
+        criterion, _ = BreastCancerClassifier._get_criterion(criterion_params)
         optimizer = BreastCancerClassifier._get_optimizer(params_to_update, optimizer_params)
         lr_scheduler = BreastCancerClassifier._get_scheduler(optimizer, scheduler_params)
 
         self.model.train()
-        for epoch in tqdm(range(num_epochs), total=num_epochs):
+        for epoch in trange(epochs):
             epoch_loss, epoch_acc = self._train_one_epoch(dataloader_train=dataloader_train,
                                                           optimizer=optimizer,
                                                           criterion=criterion,
@@ -108,16 +98,70 @@ class BreastCancerClassifier(BaseModel):
 
             epoch_metrics = dict(epoch_loss=epoch_loss, epoch_acc=epoch_acc)
             self.writer.loss(epoch_metrics, self.model_step)
+            self.writer.hparams(dict(lr=optimizer.param_groups[0]['lr']), self.model_step)
 
-            if dataloader_val and epoch % evaluation_interval == 0 and epoch != 0:
-                self.evaluate(dataloader_val, criterion)
-                self.predict(dataloader_val)
-        #last eval
-        self.evaluate(dataloader_val, criterion)
-        self.predict(dataloader_val)
+            if epoch % evaluation_interval == 0 and epoch != 0:
+                if dataloader_val is not None:
+                    self.evaluate(dataloader_val, criterion, tensorboard_metric_mode="val")
+                    self.predict(dataloader_val)
+                if evaluate_train is True:
+                    self.evaluate(dataloader_train, criterion, tensorboard_metric_mode="train")
+                if save_cp:
+                    self._save_checkpoint()
+        # last eval
+        if dataloader_val is not None:
+            last_eval_score = self.evaluate(dataloader_val, criterion, tensorboard_metric_mode="val")
+            self.predict(dataloader_val)
+        else:
+            last_eval_score = None
+        if evaluate_train is True:
+            self.evaluate(dataloader_train, criterion, tensorboard_metric_mode="train")
+        if save_cp:
+            self._save_checkpoint()
 
+        # self.writer.graph(self.model, dataloader_val, self.device)  # get model graph
 
-    def evaluate(self, dataloader_val, criterion, batch_sample=50):
+        metric_dict = dict(last_epoch_loss=epoch_loss,
+                           last_eval_score=last_eval_score)
+        hparam_dict = dict(epochs=epochs,
+                           scale=dataloader_train.dataset.scale,
+                           batch_size=dataloader_train.batch_size,
+                           optimizer=optimizer,
+                           lr_scheduler=lr_scheduler,
+                           criterion=criterion)
+        self.writer.totals(hparam_dict, metric_dict)
+
+        self.writer.close()
+
+    def cv(self, *, dataloader_train, dataloader_val, train_config, cross_val_config):
+        # TODO: check out Skorch for smarter cross-validation
+
+        train_default_hparams = dict(
+            epochs=train_config["epochs"],
+            batch_sample=train_config["batch_sample"],
+            criterion_params=train_config["criterion_params"],
+            scheduler_params=train_config["scheduler_params"],
+            optimizer_params=train_config["optimizer_params"]
+        )
+
+        BreastCancerClassifier._cv_check_config_alignement(train_default_hparams, cross_val_config)
+
+        combinations = BreastCancerClassifier._cv_params_combination(cross_val_config)
+
+        for cross_val_params in combinations:
+            train_cross_val_hparams = BreastCancerClassifier._cv_update_params(train_default_hparams, cross_val_params)
+
+            torch.cuda.empty_cache()
+
+            self.train(dataloader_train=dataloader_train,
+                       dataloader_val=dataloader_val,
+                       save_cp=train_config["save_cp"],
+                       evaluation_interval=train_config["evaluation_interval"],
+                       evaluate_train=train_config["evaluate_train"],
+                       **train_cross_val_hparams)
+
+    def evaluate(self, dataloader_val, criterion,
+                 tensorboard_metric_mode: str = "val"):
         init_training_state = self.model.training
         self.model.eval()
 
@@ -134,10 +178,6 @@ class BreastCancerClassifier(BaseModel):
             metric_dict['preds'].extend(preds)
             metric_dict['labels'].extend(labels)
 
-            #TODO: remove after testing
-            if batch_sample and batch_sample == idx:
-                break
-
         tot, support = criterion.evaluate(metric_dict)
 
         classes = dataloader_val.dataset.classes
@@ -145,7 +185,8 @@ class BreastCancerClassifier(BaseModel):
         self.writer.evaluate(val_score_dict=tot,
                              classes=classes,
                              support=support,
-                             model_step=self.model_step)
+                             model_step=self.model_step,
+                             mode=tensorboard_metric_mode)
 
         # go back to training state, if model was in training state
         if init_training_state is True:
@@ -153,7 +194,7 @@ class BreastCancerClassifier(BaseModel):
 
         return tot
 
-    def predict(self, dataloader_val, num_images=5, batch_samples=100, resize_factor=4):
+    def predict(self, dataloader_val, num_images=5):
         init_training_state = self.model.training
         self.model.eval()
 
@@ -179,9 +220,6 @@ class BreastCancerClassifier(BaseModel):
                 elif not match and len(prediction_dict['false_positive'][pred_class]) <= num_images:
                     input = self._resize_tensor(input)
                     prediction_dict['false_positive'][pred_class].append(input)
-
-            if idx == batch_samples:
-                break
 
         self.writer.predict(prediction_dict=prediction_dict,
                             model_step=self.model_step)
@@ -215,11 +253,10 @@ class BreastCancerClassifier(BaseModel):
             if batch_sample and batch_sample == idx:
                 break
 
-        epoch_loss = running_loss / idx*dataloader_train.batch_size
-        epoch_acc = running_corrects / idx*dataloader_train.batch_size
+        epoch_loss = running_loss / idx * dataloader_train.batch_size
+        epoch_acc = running_corrects / idx * dataloader_train.batch_size
 
         return epoch_loss, epoch_acc
-
 
     def _train_single_batch(self, inputs, labels, optimizer, is_inception, criterion) -> (float, np.ndarray):
         # zero the parameter gradients
@@ -249,71 +286,74 @@ class BreastCancerClassifier(BaseModel):
 
         return loss, preds
 
-    def _initialize_model(self):
+    def _initialize_model(self, model_name, use_pretrained, num_classes, feature_extract, pretrained_model_path):
 
-        if self.model_name == "resnet":
+        if model_name == "resnet":
             """ Resnet18
             """
-            model_ft = models.resnet18(pretrained=self.use_pretrained)
-            self.set_parameter_requires_grad(self.feature_extract, model_ft)
+            model_ft = models.resnet18(pretrained=use_pretrained)
+            self.set_parameter_requires_grad(feature_extract, model_ft)
             num_ftrs = model_ft.fc.in_features
-            model_ft.fc = nn.Linear(num_ftrs, self.num_classes)
+            model_ft.fc = nn.Linear(num_ftrs, num_classes)
             input_size = 224
 
-        elif self.model_name == "alexnet":
+        elif model_name == "alexnet":
             """ Alexnet
             """
-            model_ft = models.alexnet(pretrained=self.use_pretrained)
-            self.set_parameter_requires_grad(self.feature_extract, model_ft)
+            model_ft = models.alexnet(pretrained=use_pretrained)
+            self.set_parameter_requires_grad(feature_extract, model_ft)
             num_ftrs = model_ft.classifier[6].in_features
-            model_ft.classifier[6] = nn.Linear(num_ftrs, self.num_classes)
+            model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
             input_size = 224
 
-        elif self.model_name == "vgg":
+        elif model_name == "vgg":
             """ VGG11_bn
             """
-            model_ft = models.vgg11_bn(pretrained=self.use_pretrained)
-            self.set_parameter_requires_grad(self.feature_extract, model_ft)
+            model_ft = models.vgg11_bn(pretrained=use_pretrained)
+            self.set_parameter_requires_grad(feature_extract, model_ft)
             num_ftrs = model_ft.classifier[6].in_features
-            model_ft.classifier[6] = nn.Linear(num_ftrs, self.num_classes)
+            model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
             input_size = 224
 
-        elif self.model_name == "squeezenet":
+        elif model_name == "squeezenet":
             """ Squeezenet
             """
-            model_ft = models.squeezenet1_0(pretrained=self.use_pretrained)
-            self.set_parameter_requires_grad(self.feature_extract, model_ft)
-            model_ft.classifier[1] = nn.Conv2d(512, self.num_classes, kernel_size=(1, 1), stride=(1, 1))
-            model_ft.num_classes = self.num_classes
+            model_ft = models.squeezenet1_0(pretrained=use_pretrained)
+            self.set_parameter_requires_grad(feature_extract, model_ft)
+            model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1, 1), stride=(1, 1))
+            model_ft.num_classes = num_classes
             input_size = 224
 
-        elif self.model_name == "densenet":
+        elif model_name == "densenet":
             """ Densenet
             """
-            model_ft = models.densenet121(pretrained=self.use_pretrained)
-            self.set_parameter_requires_grad(self.feature_extract, model_ft)
+            model_ft = models.densenet121(pretrained=use_pretrained)
+            self.set_parameter_requires_grad(feature_extract, model_ft)
             num_ftrs = model_ft.classifier.in_features
-            model_ft.classifier = nn.Linear(num_ftrs, self.num_classes)
+            model_ft.classifier = nn.Linear(num_ftrs, num_classes)
             input_size = 224
 
-        elif self.model_name == "inception":
+        elif model_name == "inception":
             """ Inception v3
             Be careful, expects (299,299) sized images and has auxiliary output
             """
-            model_ft = models.inception_v3(pretrained=self.use_pretrained)
-            self.set_parameter_requires_grad(self.feature_extract, model_ft)
+            model_ft = models.inception_v3(pretrained=use_pretrained)
+            self.set_parameter_requires_grad(feature_extract, model_ft)
             # Handle the auxilary net
             num_ftrs = model_ft.AuxLogits.fc.in_features
-            model_ft.AuxLogits.fc = nn.Linear(num_ftrs, self.num_classes)
+            model_ft.AuxLogits.fc = nn.Linear(num_ftrs, num_classes)
             # Handle the primary net
             num_ftrs = model_ft.fc.in_features
-            model_ft.fc = nn.Linear(num_ftrs, self.num_classes)
+            model_ft.fc = nn.Linear(num_ftrs, num_classes)
             input_size = 299
 
         else:
-            raise ValueError(f"Invalid model name {self.model_name}")
+            raise ValueError(f"Invalid model name {model_name}")
 
-        return model_ft, input_size
+        if pretrained_model_path is not None:
+            self._load_pretrained_model(model_ft, pretrained_model_path)
+
+        return model_ft, input_size, feature_extract
 
     def _initialize_writer(self):
         if self.summary_mode == "tensorboard":
@@ -362,8 +402,21 @@ class BreastCancerClassifier(BaseModel):
 
         return self.params_to_update
 
-    def _load_pretrained_model(self, pretrained_model_path):
-        raise NotImplementedError
+    def _load_pretrained_model(self, model, pretrained_model_path):
+        # TODO: check this fun
+        model_dict = model.state_dict()
+        pretrained_dict = torch.load(pretrained_model_path)
+        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
+        model_dict.update(pretrained_dict)
+        model.load_state_dict(model_dict)
+
+    def _save_checkpoint(self):
+        # TODO: check this fun
+        mkdir(self.cp_dir)
+        model_dir = os.path.join(self.cp_dir, f"CP_epochs_{self.model_step + 1}_{get_converted_timestamp()}.pth")
+        torch.save(self.model.state_dict(),
+                   model_dir)
+        logging.info(f'Checkpoint {self.model_step + 1} saved !')
 
     def _get_tensorboard_dir(self):
         converted_timestamp = get_converted_timestamp()
