@@ -1,11 +1,8 @@
 from breast_cancer_research.base.base_summary_logger import SummaryLogger
-from typing import Optional, Union
+from typing import Optional
 import logging
-from torch.utils.data import DataLoader
 import torch
-import cv2
-from breast_cancer_research.utils.utils import hwc_2_chw
-import numpy as np
+from breast_cancer_research.utils.visualize import overlay_mask
 
 class UnetSummaryWriter(SummaryLogger):
     def __init__(self, log_dir: Optional[str] = None, comment: Optional[str] = None):
@@ -25,17 +22,25 @@ class UnetSummaryWriter(SummaryLogger):
             self.add_scalar(f'{metric_mode}/{k}', v, model_step)
 
     def predict(self, prediction_dict, model_step, sample_batch: Optional[int] = 10):
-        for idx in range(len(prediction_dict["all_images"])):
-            self.add_images(f'{idx}/original_images', prediction_dict["all_images"][idx])
-            self.add_images(f'{idx}/benign/ground_truth', prediction_dict["all_truth_masks"][idx][0])
-            self.add_images(f'{idx}/benign/predictions', prediction_dict["all_pred_masks"][idx][0],
-                                   model_step)
-            self.add_images(f'{idx}/malignant/ground_truth', prediction_dict["all_truth_masks"][idx][1])
-            self.add_images(f'{idx}/malignant/predictions', prediction_dict["all_pred_masks"][idx][1],
-                                   model_step)
-            self.add_images(f'{idx}/background/ground_truth', prediction_dict["all_truth_masks"][idx][2])
-            self.add_images(f'{idx}/background/predictions', prediction_dict["all_pred_masks"][idx][2],
-                                   model_step)
+        all_steps = 0
+        for idx1 in range(len(prediction_dict["all_images"])):
+            classname = prediction_dict["classnames"][idx1]
+            for idx2 in range(prediction_dict["all_images"][idx1].shape[0]):
+                img_tensor = prediction_dict["all_images"][idx1][idx2]
+                pred_masks = prediction_dict["all_pred_masks"][idx1][idx2]
+                ground_truth_masks = prediction_dict["all_truth_masks"][idx1][idx2]
 
-            if sample_batch and sample_batch == idx:
-                break
+                benign_img = overlay_mask(tensor_img=img_tensor,
+                                          tensor_masks=torch.stack([pred_masks[0], ground_truth_masks[0]]),
+                                          classnames=[classname[0][0], classname[0][0] + "_ground_truth"])
+                self.add_image(f'{all_steps}/benign', benign_img, model_step, dataformats='HWC')
+
+                malignant_img = overlay_mask(tensor_img=img_tensor,
+                                          tensor_masks=torch.stack([pred_masks[1], ground_truth_masks[1]]),
+                                          classnames=[classname[1][0], classname[1][0] + "_ground_truth"])
+                self.add_image(f'{all_steps}/malignant', malignant_img, model_step, dataformats='HWC')
+
+                if sample_batch and sample_batch == all_steps:
+                    break
+
+                all_steps += 1

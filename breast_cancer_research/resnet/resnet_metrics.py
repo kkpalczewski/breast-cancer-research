@@ -4,9 +4,11 @@ from typing import List, Dict, Tuple
 from torch import Tensor
 from sklearn.metrics import precision_recall_fscore_support
 
+
 class CrossEntropyMetrics(nn.Module, BaseMetrics):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        activation_name: str = "softmax",
         self.forward_criterion = nn.CrossEntropyLoss(*args, **kwargs)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
@@ -19,7 +21,7 @@ class CrossEntropyMetrics(nn.Module, BaseMetrics):
 
         labels = preds_labels_dict['labels']
         preds = preds_labels_dict['preds']
-
+        import pdb;pdb.set_trace()
         precision, recall, fbeta_score, support = precision_recall_fscore_support(y_true=labels, y_pred=preds)
 
         metric_dict = dict(

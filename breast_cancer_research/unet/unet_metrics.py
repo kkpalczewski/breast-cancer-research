@@ -3,19 +3,22 @@ import torch.nn as nn
 from typing import List, Union
 from breast_cancer_research.base.base_metrics import BaseMetrics
 
+
 class BinaryDiceLoss(nn.Module, BaseMetrics):
     def __init__(self,
                  activation_name: str = "softmax",
                  weights: List[float] = (1, 1, 1),
                  device: str = "cuda",
                  reduction: str = "mean",
-                 eval_threshold: float = 0.5):
+                 eval_threshold: float = 0.5,
+                 smooth: float = 1):
 
         super().__init__()
 
         self.device = device
         self.eval_threshold = eval_threshold
         self.activation = self._get_activation(activation_name)
+        self.smooth = torch.tensor(smooth, device=device)
 
         # get weights
         if not isinstance(weights, torch.Tensor):
@@ -43,14 +46,14 @@ class BinaryDiceLoss(nn.Module, BaseMetrics):
         # activation func
         preds = self.activation(preds)
 
-        #TODO: check if this is a good way of taking mean from batch
+        # TODO: check if this is a good way of taking mean from batch
         for target_batch, pred_batch, weight in zip(targets, preds, self.weights):
             for target, pred in zip(target_batch, pred_batch):
-                dice_similarity = self.metric_dice_similarity(target, pred)
+                dice_similarity = self.metric_dice_similarity(target, pred, self.smooth)
                 dice_loss_with_weights += (torch.ones(1, device=self.device) - dice_similarity) * weight
 
         if self.reduction == "mean":
-            reduced_dice_loss = dice_loss_with_weights/len(targets[0])/len(targets)
+            reduced_dice_loss = dice_loss_with_weights / len(targets[0]) / len(targets)
         elif self.reduction == "sum":
             reduced_dice_loss = dice_loss_with_weights
         else:
@@ -85,7 +88,7 @@ class BinaryDiceLoss(nn.Module, BaseMetrics):
             combined_metrics[f'benign_{eval_fun}'] = benign_eval_dict[eval_fun].data
             combined_metrics[f'malignant_{eval_fun}'] = malignant_eval_dict[eval_fun].data
             combined_metrics[f'combined_{eval_fun}'] = (
-                        (malignant_eval_dict[eval_fun] + benign_eval_dict[eval_fun]) / 2).data
+                    (malignant_eval_dict[eval_fun] + benign_eval_dict[eval_fun]) / 2).data
 
         return combined_metrics
 
@@ -106,7 +109,7 @@ class BinaryDiceLoss(nn.Module, BaseMetrics):
 
         assert eval_func in [*eval_metrics_dict.keys()], f"Metric {eval_func} not implemented"
 
-        return eval_metrics_dict[eval_func](target, pred).cpu().float()
+        return eval_metrics_dict[eval_func](target, pred, self.smooth).cpu().float()
 
     def _eval_totals(self, metric, total: str):
         eval_totals_dict = dict(
@@ -116,28 +119,3 @@ class BinaryDiceLoss(nn.Module, BaseMetrics):
         assert total in [*eval_totals_dict.keys()], f"Total {total} not implemented"
 
         return eval_totals_dict[total](torch.stack(metric)).data
-
-    @staticmethod
-    def metric_dice_similarity(target, pred) -> torch.Tensor:
-        target = target.contiguous().view(-1)
-        pred = pred.contiguous().view(-1)
-
-        target_pred_product = torch.sum(target * pred)
-        target_sum = torch.sum(target)
-        pred_sum = torch.sum(pred)
-
-        single_dice_similarity = (2 * target_pred_product) / (target_sum + pred_sum)
-
-        return single_dice_similarity
-
-    @staticmethod
-    def metric_target_coverage(target, pred) -> torch.Tensor:
-        target = target.contiguous().view(-1)
-        pred = pred.contiguous().view(-1)
-
-        target_pred_product = torch.sum(target * pred)
-        target_sum = torch.sum(target)
-
-        single_target_coverage = target_pred_product / target_sum
-
-        return single_target_coverage

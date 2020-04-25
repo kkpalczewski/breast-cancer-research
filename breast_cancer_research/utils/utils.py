@@ -66,3 +66,6 @@ def unpickle(file):
 
 def hwc_2_chw(img):
     return np.transpose(img, (2, 0, 1))
+
+def chw_2_hwc(img):
+    return np.transpose(img, (1, 2, 0))

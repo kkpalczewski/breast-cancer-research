@@ -1,16 +1,14 @@
 # ml
 import numpy as np
 import torch
-from torch.utils.data import Dataset
 # logging and typing
 import logging
 from typing import Optional, Mapping
 # basic
-import os
 import pandas as pd
-import cv2
-#custom
+# custom
 from breast_cancer_research.base.base_dataset import BaseDataset
+
 
 class UnetDataset(BaseDataset):
     ORIGINAL_RATIO = 1.7
@@ -57,7 +55,8 @@ class UnetDataset(BaseDataset):
             f'benign size -> {mask_benign.size}, malignant size -> {mask_malignant.size}'
 
         training_records = {'image': torch.from_numpy(img),
-                            'mask': torch.from_numpy(mask)}
+                            'mask': torch.from_numpy(mask),
+                            'classname': ["benign", "malignant", "background"]}
 
         return training_records
 

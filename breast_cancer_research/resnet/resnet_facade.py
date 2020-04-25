@@ -6,7 +6,7 @@ import os
 import torch
 import torch.nn as nn
 from torchvision import models
-from tqdm import trange
+from tqdm import trange, tqdm
 import numpy as np
 from collections import defaultdict
 from torchvision import transforms
@@ -32,7 +32,7 @@ class BreastCancerClassifier(BaseModel):
         if summary_mode == "tensorboard":
             self.cp_dir = cp_dir
             self.run_dir = run_dir
-        self.writer = self._initialize_writer()
+        self.writer, self.run_dir, self.cp_dir = self._initialize_writer()
 
         # global step vars
         self._global_step = self.global_step
@@ -60,16 +60,17 @@ class BreastCancerClassifier(BaseModel):
               dataloader_train,
               dataloader_val,
               *,
-              epochs=25,
-              is_inception=False,
+              epochs: int = 25,
+              is_inception: bool = False,
               batch_sample: Optional[int] = None,
               save_cp: bool = True,
               scheduler_params: Optional[dict] = None,
               criterion_params: Optional[dict] = None,
               optimizer_params: Optional[dict] = None,
-              evaluation_interval: int = 1,
+              evaluation_interval: int = 10,
               evaluate_train: bool = True,
-              eval_mask_threshold: float = 0.5):
+              eval_mask_threshold: float = 0.5,
+              train_metadata: Optional[dict] = None):
 
         # get mutable defaults
         if scheduler_params is None or scheduler_params == {}:
@@ -82,9 +83,17 @@ class BreastCancerClassifier(BaseModel):
         # Observe that all parameters are being optimized
         params_to_update = self._get_params_to_update()
 
-        criterion, _ = BreastCancerClassifier._get_criterion(criterion_params)
-        optimizer = BreastCancerClassifier._get_optimizer(params_to_update, optimizer_params)
-        lr_scheduler = BreastCancerClassifier._get_scheduler(optimizer, scheduler_params)
+        criterion, out_layer_name = BaseModel.get_criterion(criterion_params)
+        out_layer = BaseModel.get_out_layer(out_layer_name)
+        optimizer = BaseModel.get_optimizer(params_to_update, optimizer_params)
+        lr_scheduler = BaseModel.get_scheduler(optimizer, scheduler_params)
+
+        hparam_dict = dict(epochs=epochs,
+                           batch_size=dataloader_train.batch_size,
+                           optimizer=optimizer,
+                           lr_scheduler=lr_scheduler,
+                           criterion=criterion)
+        self.writer.totals(hparam_dict, {}, train_metadata)
 
         self.model.train()
         for epoch in trange(epochs):
@@ -121,16 +130,6 @@ class BreastCancerClassifier(BaseModel):
 
         # self.writer.graph(self.model, dataloader_val, self.device)  # get model graph
 
-        metric_dict = dict(last_epoch_loss=epoch_loss,
-                           last_eval_score=last_eval_score)
-        hparam_dict = dict(epochs=epochs,
-                           scale=dataloader_train.dataset.scale,
-                           batch_size=dataloader_train.batch_size,
-                           optimizer=optimizer,
-                           lr_scheduler=lr_scheduler,
-                           criterion=criterion)
-        self.writer.totals(hparam_dict, metric_dict)
-
         self.writer.close()
 
     def cv(self, *, dataloader_train, dataloader_val, train_config, cross_val_config):
@@ -160,23 +159,27 @@ class BreastCancerClassifier(BaseModel):
                        evaluate_train=train_config["evaluate_train"],
                        **train_cross_val_hparams)
 
-    def evaluate(self, dataloader_val, criterion,
+    def evaluate(self,
+                 dataloader_val,
+                 criterion,
                  tensorboard_metric_mode: str = "val"):
-        init_training_state = self.model.training
-        self.model.eval()
 
         metric_dict = defaultdict(list)
 
-        for idx, (inputs, labels) in enumerate(dataloader_val):
-            inputs = inputs.to(self.device)
-            preds = self.model(inputs)
+        with torch.no_grad():
+            for idx, (inputs, labels) in tqdm(enumerate(dataloader_val), total=len(dataloader_val)):
+                inputs = inputs.to(self.device)
+                preds = self.model(inputs)
 
-            preds = preds.detach().to("cpu").tolist()
-            preds = np.argmax(preds, axis=1)
-            labels = labels.to("cpu").tolist()
+                preds = preds.detach().to("cpu").tolist()
+                import pdb;
+                pdb.set_trace()
+                preds = np.argmax(preds, axis=1)
 
-            metric_dict['preds'].extend(preds)
-            metric_dict['labels'].extend(labels)
+                labels = labels.to("cpu").tolist()
+
+                metric_dict['preds'].extend(preds)
+                metric_dict['labels'].extend(labels)
 
         tot, support = criterion.evaluate(metric_dict)
 
@@ -188,45 +191,36 @@ class BreastCancerClassifier(BaseModel):
                              model_step=self.model_step,
                              mode=tensorboard_metric_mode)
 
-        # go back to training state, if model was in training state
-        if init_training_state is True:
-            self.model.train()
-
         return tot
 
     def predict(self, dataloader_val, num_images=5):
-        init_training_state = self.model.training
-        self.model.eval()
 
         prediction_dict = defaultdict(lambda: defaultdict(list))
         classes = dataloader_val.dataset.classes
 
-        for idx, (inputs, labels) in enumerate(dataloader_val):
-            inputs_tensor = inputs.to(self.device)
-            preds = self.model(inputs_tensor)
+        with torch.no_grad():
+            for idx, (inputs, labels) in enumerate(dataloader_val):
+                inputs_tensor = inputs.to(self.device)
+                preds = self.model(inputs_tensor)
 
-            preds = preds.detach().to("cpu").tolist()
-            preds = np.argmax(preds, axis=1)
-            labels = labels.to("cpu").tolist()
+                preds = preds.detach().to("cpu").tolist()
+                preds = np.argmax(preds, axis=1)
+                labels = labels.to("cpu").tolist()
 
-            for pred, label, input in zip(preds, labels, inputs):
-                pred_class = classes[pred]
-                label_class = classes[label]
-                match = (pred_class == label_class)
+                for pred, label, input in zip(preds, labels, inputs):
+                    pred_class = classes[pred]
+                    label_class = classes[label]
+                    match = (pred_class == label_class)
 
-                if match and len(prediction_dict['true_positive'][pred_class]) <= num_images:
-                    input = self._resize_tensor(input)
-                    prediction_dict['true_positive'][pred_class].append(input)
-                elif not match and len(prediction_dict['false_positive'][pred_class]) <= num_images:
-                    input = self._resize_tensor(input)
-                    prediction_dict['false_positive'][pred_class].append(input)
+                    if match and len(prediction_dict['true_positive'][pred_class]) <= num_images:
+                        input = self._resize_tensor(input)
+                        prediction_dict['true_positive'][pred_class].append(input)
+                    elif not match and len(prediction_dict['false_positive'][pred_class]) <= num_images:
+                        input = self._resize_tensor(input)
+                        prediction_dict['false_positive'][pred_class].append(input)
 
         self.writer.predict(prediction_dict=prediction_dict,
                             model_step=self.model_step)
-
-        # go back to training state, if model was in training state
-        if init_training_state is True:
-            self.model.train()
 
     def set_parameter_requires_grad(self, feature_extracting, model_ft):
         if feature_extracting:
@@ -287,7 +281,6 @@ class BreastCancerClassifier(BaseModel):
         return loss, preds
 
     def _initialize_model(self, model_name, use_pretrained, num_classes, feature_extract, pretrained_model_path):
-
         if model_name == "resnet":
             """ Resnet18
             """
@@ -364,7 +357,7 @@ class BreastCancerClassifier(BaseModel):
         else:
             raise ValueError(f"Summary mode {self.summary_mode} not implemented")
 
-        return writer
+        return writer, current_runs_dir, current_cp_dir
 
     def _get_transform(self):
         data_transforms = {
@@ -404,6 +397,7 @@ class BreastCancerClassifier(BaseModel):
 
     def _load_pretrained_model(self, model, pretrained_model_path):
         # TODO: check this fun
+
         model_dict = model.state_dict()
         pretrained_dict = torch.load(pretrained_model_path)
         pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
@@ -429,7 +423,7 @@ class BreastCancerClassifier(BaseModel):
     def _resize_tensor(self, img):
         transform = transforms.Compose([
             transforms.ToPILImage(),
-            transforms.Resize(128),
+            transforms.Resize(256),
             transforms.ToTensor()
         ])
 

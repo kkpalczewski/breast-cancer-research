@@ -4,17 +4,12 @@ from tqdm import tqdm, trange
 import os
 # ML
 import numpy as np
-# TODO: check it
 from torch.backends import cudnn
-import torch
 from torch.utils.data import DataLoader
-import torch.nn as nn
 # custom
 from breast_cancer_research.utils.utils import elapsed_time
 from breast_cancer_research.utils.utils import counter_global_step, mkdir, get_converted_timestamp, prevent_oom_error
-import breast_cancer_research.base.base_model
 from breast_cancer_research.unet.unet_tensorboard import UnetSummaryWriter
-from time import time
 # basic
 from typing import Dict
 from collections import defaultdict
@@ -23,9 +18,10 @@ import logging
 import torch
 # custom
 from breast_cancer_research.unet.unet_model import UNet
+from breast_cancer_research.base.base_model import BaseModel
 
 
-class BreastCancerSegmentator(breast_cancer_research.base.base_model.BaseModel):
+class BreastCancerSegmentator(BaseModel):
     def __init__(self,
                  model_params: Mapping,
                  device: torch.device = "cuda",
@@ -45,7 +41,7 @@ class BreastCancerSegmentator(breast_cancer_research.base.base_model.BaseModel):
         if summary_mode == "tensorboard":
             self.cp_dir = cp_dir
             self.run_dir = run_dir
-        self.writer = self._initialize_writer()
+        self.writer, self.run_dir, self.cp_dir = self._initialize_writer()
 
         # faster convolutions, but more memory
         cudnn.benchmark = cudnn_benchmark
@@ -98,11 +94,20 @@ class BreastCancerSegmentator(breast_cancer_research.base.base_model.BaseModel):
                 f'and {dataloader_val.dataset.scale}. It would cause val metrics irrelevant.'
 
         # get scheduler, optimizer, criterion
-        optimizer = BreastCancerSegmentator._get_optimizer(self.model.parameters(), optimizer_params)
-        lr_scheduler = BreastCancerSegmentator._get_scheduler(optimizer, scheduler_params)
-        criterion, out_layer_name = BreastCancerSegmentator._get_criterion(criterion_params)
+        optimizer = BaseModel.get_optimizer(self.model.parameters(), optimizer_params)
+        lr_scheduler = BaseModel.get_scheduler(optimizer, scheduler_params)
+        criterion, out_layer_name = BaseModel.get_criterion(criterion_params)
 
-        for epoch in trange(epochs, desc="Training epochs", total=epochs):
+        #init training params
+        hparam_dict = dict(epochs=epochs,
+                           batch_size=dataloader_train.batch_size,
+                           scale=dataloader_train.dataset.scale,
+                           optimizer=optimizer,
+                           lr_scheduler=lr_scheduler,
+                           criterion=criterion)
+        self.writer.totals(hparam_dict, {})
+
+        for epoch in trange(epochs, desc="Training epochs", total=epochs, position=0, leave=True):
             epoch_loss = self._train_one_epoch(dataloader_train=dataloader_train,
                                                criterion=criterion,
                                                optimizer=optimizer)
@@ -192,31 +197,24 @@ class BreastCancerSegmentator(breast_cancer_research.base.base_model.BaseModel):
         Predict mask
         """
 
-        init_training_state = self.model.training
-        self.model.eval()
+        out_layer = BaseModel.get_out_layer(out_layer_name)
 
-        if out_layer_name == "sigmoid":
-            out_layer = torch.nn.Sigmoid()
-        elif out_layer_name == "softmax":
-            out_layer = nn.Softmax(dim=1)
-        else:
-            raise AttributeError("Not implemented out layer parameter: {}".format(out_layer_name))
-
-        # TODO: change dataset_test for imgs?
         prediction_dict = defaultdict(list)
 
         with torch.no_grad():
             for idx, batch in enumerate(prediction_loader):
                 imgs = batch['image']
                 true_masks = batch['mask']
+                classnames = batch['classname']
                 imgs_tensor = imgs.to(device=self.device, dtype=torch.float32)
                 pred_masks = self.model(imgs_tensor)
                 pred_masks = out_layer(pred_masks)
 
-                prediction_dict['all_images'].append(imgs)
+                prediction_dict['all_images'].append(imgs.cpu())
                 # [mask_benign, mask_malignent, mask_background]
-                prediction_dict['all_truth_masks'].append([mask.reshape(1, 1, *mask.shape) for mask in true_masks[0]])
-                prediction_dict['all_pred_masks'].append([mask.reshape(1, 1, *mask.shape) for mask in pred_masks[0]])
+                prediction_dict['all_truth_masks'].append(true_masks)
+                prediction_dict['all_pred_masks'].append(pred_masks.cpu())
+                prediction_dict['classnames'].append(classnames)
 
                 # if there is a sample break
                 if sample_batch and sample_batch == idx:
@@ -224,10 +222,6 @@ class BreastCancerSegmentator(breast_cancer_research.base.base_model.BaseModel):
 
         if tensorboard_verbose is True:
             self.writer.predict(prediction_dict, self.model_step)
-
-        # go back to training state, if model was in training state
-        if init_training_state is True:
-            self.model.train()
 
         return prediction_dict
 
@@ -238,33 +232,28 @@ class BreastCancerSegmentator(breast_cancer_research.base.base_model.BaseModel):
                  threshold: float = 0.5,
                  tensorboard_verbose: bool = True,
                  tensorboard_metric_mode: str = "val"):
-        init_training_state = self.model.training
-        self.model.eval()
 
         multiple_metrics = defaultdict(list)
 
-        for batch in tqdm(eval_loader):
-            imgs = batch['image']
-            true_masks = batch['mask']
+        with torch.no_grad():
+            for batch in tqdm(eval_loader, total=len(eval_loader), position=0, leave=True):
+                imgs = batch['image']
+                true_masks = batch['mask']
 
-            imgs = imgs.to(device=self.device, dtype=torch.float32)
-            mask_pred = self.model(imgs)
-            mask_pred = mask_pred.detach().cpu()
-            batch_metrics = criterion.evaluate(mask_pred, true_masks)
+                imgs = imgs.to(device=self.device, dtype=torch.float32)
+                mask_pred = self.model(imgs)
+                mask_pred = mask_pred.detach().cpu()
+                batch_metrics = criterion.evaluate(mask_pred, true_masks)
 
-            for single_metric in batch_metrics:
-                for k, v in single_metric.items():
-                    multiple_metrics[k].append(v)
+                for single_metric in batch_metrics:
+                    for k, v in single_metric.items():
+                        multiple_metrics[k].append(v)
 
         tot = {k+"_mean": np.mean(v) for k, v in multiple_metrics.items()}
 
         if tensorboard_verbose is True:
             self.writer.evaluate(tot, self.model_step, mode=tensorboard_metric_mode)
             logging.info(tot)
-
-        # go back to training state, if model was in training state
-        if init_training_state is True:
-            self.model.train()
 
         return tot
 
@@ -273,7 +262,8 @@ class BreastCancerSegmentator(breast_cancer_research.base.base_model.BaseModel):
         self.model.train()
         epoch_loss = 0
 
-        for batch in tqdm(dataloader_train):
+        #for batch in tqdm(dataloader_train, total=len(dataloader_train), position=1):
+        for batch in dataloader_train:
             imgs = batch['image']
             masks_ground_truth = batch['mask']
 
@@ -331,7 +321,7 @@ class BreastCancerSegmentator(breast_cancer_research.base.base_model.BaseModel):
         else:
             raise ValueError(f"Summary mode {self.summary_mode} not implemented")
 
-        return writer
+        return writer, current_runs_dir, current_cp_dir
 
     def _save_checkpoint(self):
         mkdir(self.cp_dir)

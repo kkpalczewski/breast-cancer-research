@@ -21,8 +21,19 @@ class BaseModel(ABC):
     def evaluate(self, *args, **kwargs):
         pass
 
-    @classmethod
-    def _get_scheduler(cls, optimizer, scheduler_params: Optional[Dict] = None):
+    @staticmethod
+    def get_out_layer(out_layer_name: str):
+        if out_layer_name == "sigmoid":
+            out_layer = torch.nn.Sigmoid()
+        elif out_layer_name == "softmax":
+            out_layer = nn.Softmax(dim=1)
+        else:
+            raise AttributeError("Not implemented out layer parameter: {}".format(out_layer_name))
+
+        return out_layer
+
+    @staticmethod
+    def get_scheduler(optimizer, scheduler_params: Optional[Dict] = None):
 
         scheduler_name, scheduler_hparams = BaseModel._get_names_hparams(scheduler_params)
 
@@ -33,8 +44,8 @@ class BaseModel(ABC):
 
         return scheduler
 
-    @classmethod
-    def _get_criterion(cls, criterion_params: Optional[Dict] = None):
+    @staticmethod
+    def get_criterion(criterion_params: Optional[Dict] = None):
         criterion_name, criterion_hparams = BaseModel._get_names_hparams(criterion_params)
 
         if criterion_name == "BCE":
@@ -42,7 +53,7 @@ class BaseModel(ABC):
             out_layer_name = "sigmoid"
         elif criterion_name == "CrossEntropyLoss":
             criterion = CrossEntropyMetrics(**criterion_hparams)
-            out_layer_name = "identity"
+            out_layer_name = "softmax"
         elif criterion_name == "dice":
             criterion = BinaryDiceLoss(**criterion_hparams)
             out_layer_name = "softmax"
@@ -51,8 +62,8 @@ class BaseModel(ABC):
 
         return criterion, out_layer_name
 
-    @classmethod
-    def _get_optimizer(cls, params, optimizer_params: Optional[Dict] = None):
+    @staticmethod
+    def get_optimizer(params, optimizer_params: Optional[Dict] = None):
         optimizer_name, optimizer_hparams = BaseModel._get_names_hparams(optimizer_params)
 
         if optimizer_name == "Adam":
@@ -74,8 +85,8 @@ class BaseModel(ABC):
         hparams = params
         return name, hparams
 
-    @staticmethod
-    def _cv_update_params(train_default_hparams, cross_val_params):
+    @classmethod
+    def _cv_update_params(cls, train_default_hparams, cross_val_params):
         def _rec_cv_update_params(train_params, cross_params):
             for k, v in cross_params.items():
                 if not isinstance(v, dict):
@@ -90,8 +101,8 @@ class BaseModel(ABC):
 
         return adjusted_hparams
 
-    @staticmethod
-    def _cv_params_combination(params_dict: Dict):
+    @classmethod
+    def _cv_params_combination(cls, params_dict: Dict):
         def _rec_cv_params_combination(master_dict, key, val):
             if len(key) == 1:
                 master_dict[key[0]] = val
@@ -113,8 +124,8 @@ class BaseModel(ABC):
 
         return cv_params
 
-    @staticmethod
-    def _cv_key_val_list(mapping):
+    @classmethod
+    def _cv_key_val_list(cls, mapping):
         def _rec_cv_key_val_list(mapping, parent_key_path, all_keys_list, all_vals_list):
             for k, v in mapping.items():
                 if not isinstance(v, dict):
@@ -135,8 +146,8 @@ class BaseModel(ABC):
 
         return all_keys, all_vals
 
-    @staticmethod
-    def _cv_check_config_alignement(train_default_hparams, cross_val_config):
+    @classmethod
+    def _cv_check_config_alignement(cls, train_default_hparams, cross_val_config):
         train_keys, _ = BaseModel._cv_key_val_list(train_default_hparams)
         cross_val_keys, _ = BaseModel._cv_key_val_list(cross_val_config)
         for k in cross_val_keys:

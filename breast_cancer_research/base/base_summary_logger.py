@@ -1,6 +1,6 @@
 from torch.utils.tensorboard import SummaryWriter
 from abc import ABC, abstractmethod
-from typing import Dict
+from typing import Dict, Optional
 from torch import float32
 from torch.utils.data import DataLoader
 
@@ -25,10 +25,12 @@ class SummaryLogger(SummaryWriter, ABC):
         for k, v in hparams.items():
             self.add_scalar(f'Hparams/{k}', v, model_step)
 
-    def totals(self, hparam_dict, metric_dict):
+    def totals(self, hparam_dict, metric_dict, train_metadata: Optional[dict] = None):
+        if train_metadata is None:
+            train_metadata = {}
         hparam_dict = self._totals_hparams(hparam_dict)
         metric_dict = self._totals_metric(metric_dict)
-
+        hparam_dict.update(train_metadata)
         self.add_hparams(hparam_dict, metric_dict)
 
     def graph(self, model, dataloader_val: DataLoader, device):
@@ -66,6 +68,8 @@ class SummaryLogger(SummaryWriter, ABC):
         if 'criterion' in hparam_keys:
             if hasattr(hparam_dict['criterion'], 'weights'):
                 hparam_dict['crit/weights'] = str(hparam_dict['criterion'].weights.cpu().numpy())
+            if hasattr(hparam_dict['criterion'], 'smooth'):
+                hparam_dict['crit/smooth'] = str(hparam_dict['criterion'].smooth.cpu().numpy())
             hparam_dict['crit/class_name'] = type(hparam_dict['criterion']).__name__
             del hparam_dict['criterion']
 
