@@ -12,12 +12,15 @@ from breast_cancer_research.base.base_model import BaseModel
 
 logging.basicConfig(level=logging.DEBUG)
 
+
 def main():
     parser = argparse.ArgumentParser(description='Check model predictions')
     parser.add_argument('--resnet_config_path', type=str, help='path to resnet config')
     parser.add_argument('--val_metadata_path', type=str, help='path to val metadata')
     parser.add_argument('--unet_config_path', type=str, default=None, help='path to unet config (has to include path '
                                                                            'to pretrained unet)')
+    parser.add_argument('--predict_images', action='store_true', help='if set, sample predictions would '
+                                                                      'be added to tensorboard')
     args = parser.parse_args()
 
     logger = logging.getLogger(__name__)
@@ -71,6 +74,10 @@ def main():
 
     resnet.evaluate(dataloader_val=dataloader_val,
                     criterion=criterion)
+
+    if args.predict_images is True:
+        resnet.predict(dataloader_val=dataloader_val,
+                       num_images=20)
 
 
 if __name__ == "__main__":

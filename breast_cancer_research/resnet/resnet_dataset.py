@@ -23,8 +23,10 @@ class ResnetDataset(BaseDataset):
                  sample: Optional[int] = None,
                  unet_config: Optional[Dict] = None,
                  unet_out_layer_name: Optional[str] = None,
-                 unet_new_shape: Tuple[int] = (612, 1040),
-                 multi_target: bool = False):
+                 unet_new_shape: Tuple[int] = (1040, 612),
+                 unet_transforms_name: Optional[str] = None,
+                 multi_target: bool = False,
+                 training_transforms_name: Optional[str] = None):
 
         assert root_mask is not None or unet_config is not None, f"Mask generation not specified. root_mask or unet_config has to be specified. root_mask is None and unet_config is also None."
 
@@ -41,15 +43,26 @@ class ResnetDataset(BaseDataset):
             sample = len(self.ids)
 
         self.ids = self.ids[:sample]
-        self.transforms = self._get_transforms()
+        if training_transforms_name is None:
+            transforms_name = "ResnetEval"
+        else:
+            transforms_name = training_transforms_name
+
+        self.transforms = BaseDataset.get_transforms(transforms_name)
 
         if unet_config is not None and input_masks is True:
             self.unet = self._init_unet(unet_config)
+
+            if unet_transforms_name is None:
+                unet_transforms_name = "UnetEval"
+
+            self.unet_transforms = BaseDataset.get_transforms(unet_transforms_name)
             self.unet_new_shape = unet_new_shape
             self.unet_out_layer = BaseModel.get_out_layer(unet_out_layer_name)
             logging.info("Initialized UNet in resnet dataset ...")
         else:
             self.unet = None
+            self.unet_transforms = None
             self.unet_new_shape = None
             self.unet_out_layer = None
 
@@ -72,14 +85,15 @@ class ResnetDataset(BaseDataset):
 
                 input_img = np.stack([img, mask_benign, mask_malignant], axis=2)
             else:
-                img = BaseDataset.preprocess(img, self.unet_new_shape)
-                reshaped_img = img.reshape([1] + list(img.shape))
+                img = self._uint16_2_uint8(img)
+                img, _ = BaseDataset.transform_images_masks(img=img, transform=self.unet_transforms)
+                img = img.view([1] + list(img.shape))
                 with torch.no_grad():
-                    imgs_tensor = torch.from_numpy(reshaped_img).to(device=self.unet.device, dtype=torch.float32)
+                    imgs_tensor = img.to(device=self.unet.device, dtype=torch.float32)
                     pred_masks = self.unet.model(imgs_tensor)
                     pred_masks = self.unet_out_layer(pred_masks)
 
-                input_img = torch.cat([imgs_tensor, pred_masks[:, 0:2]], dim=1).cpu()[0]
+                input_img = torch.cat([imgs_tensor, pred_masks[:, 0:2]], dim=1).cpu()[0].numpy()
         else:
             img = self._uint16_2_uint8(img)
             dummy_mask_malignant = np.zeros(img.shape).astype(img.dtype)
@@ -90,29 +104,14 @@ class ResnetDataset(BaseDataset):
         true_class_malignant = self.metadata.iloc[i]['malignant_findings']
         targets = [true_class_benign, true_class_malignant]
 
-        if self.multi_target is False:
-            targets = np.argmax(targets)
-            targets = torch.tensor(targets).long()
-        else:
-            targets = torch.from_numpy(np.array(targets)).long()
-
-        input_img = self.transforms(input_img)
+        input_img, _ = BaseDataset.transform_images_masks(img=input_img,
+                                                          transform=self.transforms)
         targets = torch.from_numpy(np.array(targets)).long()
 
         return input_img, targets
 
     def _uint16_2_uint8(self, image):
         return np.array(image.clip(10000, 50000) / (40000 / 255)).astype(np.uint8)
-
-    def _get_transforms(self):
-        data_transforms = transforms.Compose([
-            transforms.ToPILImage(mode='RGB'),
-            transforms.Resize((224, 224), Image.NEAREST),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ])
-
-        return data_transforms
 
     def _init_unet(self, unet_params):
         unet = BreastCancerSegmentator(**unet_params)

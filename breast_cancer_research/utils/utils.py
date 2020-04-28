@@ -9,9 +9,9 @@ import numpy as np
 def mkdir(folder):
     try:
         os.mkdir(folder)
-        logging.info('Created checkpoint directory')
+        logging.debug(f'Created directory {folder}')
     except OSError:
-        pass
+        logging.debug(f'Folder {folder} already exists')
 
 
 def get_converted_timestamp():

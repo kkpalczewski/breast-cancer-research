@@ -4,21 +4,7 @@ import time
 import argparse
 import pandas as pd
 import os
-
-def create_dir(dirName):
-    """
-    Create new directory
-    :param dirName: Name of new directory to create
-    :return: Name of created directory or None, if directory already exists
-    """
-    try:
-        # Create target Directory
-        os.mkdir(dirName)
-        print("Directory " , dirName ,  " Created ")
-        return dirName
-    except FileExistsError:
-        print("Directory " , dirName ,  " already exists")
-        return None
+from breast_cancer_research.utils.utils import mkdir
 
 def convert_dicom_to_png(source_file, dest_file):
     """
@@ -57,7 +43,7 @@ def change_dicom_to_png(source_folder, dest_folder):
         i += 1
         for dir in dirs:
             new_path = os.path.join(dest_folder, root.split(source_folder + "/")[-1], dir)
-            create_dir(new_path)
+            mkdir(new_path)
 
         if i % 100 == 0:
             print("Iteration: {}".format(i))
@@ -78,7 +64,7 @@ def change_extension_in_csv(source_csv, destination_csv):
         for field in fields_to_change:
             print("Field to change: {0:30} , sample value: {1}".format(field, first_record[field]))
     except KeyError as err:
-        print("Change colmn name, which should be converted. ERROR: {}".format(err))
+        print("Change column name, which should be converted. ERROR: {}".format(err))
         return err
 
     for id, row in source_csv_file.iterrows():

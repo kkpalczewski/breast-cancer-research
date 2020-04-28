@@ -5,6 +5,7 @@ from typing import Optional, Dict, Any
 import os
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader
 from torchvision import models
 from tqdm import trange, tqdm
 import numpy as np
@@ -57,8 +58,8 @@ class BreastCancerClassifier(BaseModel):
 
     @elapsed_time
     def train(self,
-              dataloader_train,
-              dataloader_val,
+              dataloader_train: DataLoader,
+              dataloader_val: DataLoader,
               *,
               epochs: int = 25,
               is_inception: bool = False,
@@ -70,7 +71,8 @@ class BreastCancerClassifier(BaseModel):
               evaluation_interval: int = 10,
               evaluate_train: bool = True,
               eval_mask_threshold: float = 0.5,
-              train_metadata: Optional[dict] = None):
+              train_metadata: Optional[dict] = None,
+              multi_target: bool = False):
 
         # get mutable defaults
         if scheduler_params is None or scheduler_params == {}:
@@ -84,7 +86,6 @@ class BreastCancerClassifier(BaseModel):
         params_to_update = self._get_params_to_update()
 
         criterion, out_layer_name = BaseModel.get_criterion(criterion_params)
-        out_layer = BaseModel.get_out_layer(out_layer_name)
         optimizer = BaseModel.get_optimizer(params_to_update, optimizer_params)
         lr_scheduler = BaseModel.get_scheduler(optimizer, scheduler_params)
 
@@ -103,7 +104,8 @@ class BreastCancerClassifier(BaseModel):
                                                           is_inception=is_inception,
                                                           lr_scheduler=lr_scheduler,
                                                           batch_sample=batch_sample,
-                                                          epoch=epoch)
+                                                          epoch=epoch,
+                                                          multi_target=multi_target)
 
             epoch_metrics = dict(epoch_loss=epoch_loss, epoch_acc=epoch_acc)
             self.writer.loss(epoch_metrics, self.model_step)
@@ -111,20 +113,24 @@ class BreastCancerClassifier(BaseModel):
 
             if epoch % evaluation_interval == 0 and epoch != 0:
                 if dataloader_val is not None:
-                    self.evaluate(dataloader_val, criterion, tensorboard_metric_mode="val")
-                    self.predict(dataloader_val)
+                    totals = self.evaluate(dataloader_val, criterion, tensorboard_metric_mode="val")
+                    logging.info(f"Validation totals for epoch {epoch}: {totals}")
+                    self.predict(dataloader_val, multi_target=multi_target)
                 if evaluate_train is True:
                     self.evaluate(dataloader_train, criterion, tensorboard_metric_mode="train")
+                    logging.info(f"Training totals for epoch {epoch}: {totals}")
                 if save_cp:
                     self._save_checkpoint()
         # last eval
         if dataloader_val is not None:
             last_eval_score = self.evaluate(dataloader_val, criterion, tensorboard_metric_mode="val")
-            self.predict(dataloader_val)
+            logging.info(f"Validation totals for epoch {epoch}: {totals}")
+            self.predict(dataloader_val, multi_target=multi_target)
         else:
             last_eval_score = None
         if evaluate_train is True:
             self.evaluate(dataloader_train, criterion, tensorboard_metric_mode="train")
+            logging.info(f"Training totals for epoch {epoch}: {totals}")
         if save_cp:
             self._save_checkpoint()
 
@@ -132,7 +138,12 @@ class BreastCancerClassifier(BaseModel):
 
         self.writer.close()
 
-    def cv(self, *, dataloader_train, dataloader_val, train_config, cross_val_config):
+    def cv(self,
+           *,
+           dataloader_train: DataLoader,
+           dataloader_val: DataLoader,
+           train_config: Dict,
+           cross_val_config: Dict):
         # TODO: check out Skorch for smarter cross-validation
 
         train_default_hparams = dict(
@@ -160,9 +171,9 @@ class BreastCancerClassifier(BaseModel):
                        **train_cross_val_hparams)
 
     def evaluate(self,
-                 dataloader_val,
-                 criterion,
-                 tensorboard_metric_mode: str = "val"):
+                 dataloader_val: DataLoader,
+                 criterion: Any,
+                 tensorboard_metric_mode: str = "val") -> Dict:
 
         metric_dict = defaultdict(list)
 
@@ -172,10 +183,6 @@ class BreastCancerClassifier(BaseModel):
                 preds = self.model(inputs)
 
                 preds = preds.detach().to("cpu").tolist()
-                import pdb;
-                pdb.set_trace()
-                preds = np.argmax(preds, axis=1)
-
                 labels = labels.to("cpu").tolist()
 
                 metric_dict['preds'].extend(preds)
@@ -193,7 +200,10 @@ class BreastCancerClassifier(BaseModel):
 
         return tot
 
-    def predict(self, dataloader_val, num_images=5):
+    def predict(self,
+                dataloader_val: DataLoader,
+                num_images: int = 5,
+                multi_target: bool = False):
 
         prediction_dict = defaultdict(lambda: defaultdict(list))
         classes = dataloader_val.dataset.classes
@@ -208,35 +218,38 @@ class BreastCancerClassifier(BaseModel):
                 labels = labels.to("cpu").tolist()
 
                 for pred, label, input in zip(preds, labels, inputs):
+                    if multi_target is False:
+                        label = np.argmax(label)
+                    else:
+                        raise NotImplementedError("Multi target for predict method not implemented")
                     pred_class = classes[pred]
                     label_class = classes[label]
                     match = (pred_class == label_class)
 
+                    input = self._resize_tensor(input)
                     if match and len(prediction_dict['true_positive'][pred_class]) <= num_images:
-                        input = self._resize_tensor(input)
                         prediction_dict['true_positive'][pred_class].append(input)
                     elif not match and len(prediction_dict['false_positive'][pred_class]) <= num_images:
-                        input = self._resize_tensor(input)
                         prediction_dict['false_positive'][pred_class].append(input)
 
         self.writer.predict(prediction_dict=prediction_dict,
                             model_step=self.model_step)
 
-    def set_parameter_requires_grad(self, feature_extracting, model_ft):
+    def set_parameter_requires_grad(self, feature_extracting: bool, model_ft: Any):
         if feature_extracting:
             for param in model_ft.parameters():
                 param.requires_grad = False
 
     @counter_global_step
-    def _train_one_epoch(self, dataloader_train, optimizer, criterion, is_inception, lr_scheduler, batch_sample,
-                         epoch):
+    def _train_one_epoch(self, dataloader_train: DataLoader, optimizer: Any, criterion: Any, is_inception: bool,
+                         lr_scheduler: Any, batch_sample: int, epoch: int, multi_target: bool):
         running_loss = 0.0
         running_corrects = 0
         # Iterate over data.
         for idx, (inputs, labels) in enumerate(dataloader_train):
             inputs = inputs.to(self.device)
             labels = labels.to(self.device)
-            loss, preds = self._train_single_batch(inputs, labels, optimizer, is_inception, criterion)
+            loss, preds = self._train_single_batch(inputs, labels, optimizer, is_inception, criterion, multi_target)
 
             # statistics
             running_loss += loss * dataloader_train.batch_size
@@ -252,10 +265,14 @@ class BreastCancerClassifier(BaseModel):
 
         return epoch_loss, epoch_acc
 
-    def _train_single_batch(self, inputs, labels, optimizer, is_inception, criterion) -> (float, np.ndarray):
+    def _train_single_batch(self, inputs, labels, optimizer, is_inception, criterion, multi_target) -> (float, np.ndarray):
         # zero the parameter gradients
         optimizer.zero_grad()
 
+        if multi_target is False:
+            _, labels = torch.max(labels, axis=1)
+        else:
+            raise NotImplementedError("Multi target for training not implemented")
         # Get model outputs and calculate loss
         # Special case for inception because in training it has an auxiliary output. In train
         #   mode we calculate the loss by summing the final output and the auxiliary output

@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
-from typing import List, Union
+from typing import List
 from breast_cancer_research.base.base_metrics import BaseMetrics
-
 
 class BinaryDiceLoss(nn.Module, BaseMetrics):
     def __init__(self,
@@ -11,23 +10,22 @@ class BinaryDiceLoss(nn.Module, BaseMetrics):
                  device: str = "cuda",
                  reduction: str = "mean",
                  eval_threshold: float = 0.5,
-                 smooth: float = 1):
+                 smooth: float = 1,
+                 beta: float = 2):
 
         super().__init__()
 
-        self.device = device
-        self.eval_threshold = eval_threshold
-        self.activation = self._get_activation(activation_name)
-        self.smooth = torch.tensor(smooth, device=device)
-
+        self.activation = self.get_activation(activation_name)
         # get weights
         if not isinstance(weights, torch.Tensor):
             weights = torch.tensor(weights, device=device, dtype=torch.float)
         weights = torch.nn.functional.normalize(weights, dim=0)
         self.weights = weights
-
-        # get reduction
+        self.device = device
         self.reduction = reduction
+        self.eval_threshold = eval_threshold
+        self.smooth = torch.tensor(smooth, device=device)
+        self.beta = beta
 
     def forward(self, preds, targets):
         if not isinstance(targets, torch.Tensor):
@@ -50,7 +48,8 @@ class BinaryDiceLoss(nn.Module, BaseMetrics):
         for target_batch, pred_batch, weight in zip(targets, preds, self.weights):
             for target, pred in zip(target_batch, pred_batch):
                 dice_similarity = self.metric_dice_similarity(target, pred, self.smooth)
-                dice_loss_with_weights += (torch.ones(1, device=self.device) - dice_similarity) * weight
+                #dice_loss_with_weights += (torch.ones(1, device=self.device) - dice_similarity) * weight
+                dice_loss_with_weights += (torch.ones(1, device=self.device) - torch.pow(dice_similarity, 1/self.beta)) * weight
 
         if self.reduction == "mean":
             reduced_dice_loss = dice_loss_with_weights / len(targets[0]) / len(targets)

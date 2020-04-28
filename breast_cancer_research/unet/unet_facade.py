@@ -11,7 +11,7 @@ from breast_cancer_research.utils.utils import elapsed_time
 from breast_cancer_research.utils.utils import counter_global_step, mkdir, get_converted_timestamp, prevent_oom_error
 from breast_cancer_research.unet.unet_tensorboard import UnetSummaryWriter
 # basic
-from typing import Dict
+from typing import Dict, Tuple
 from collections import defaultdict
 import logging
 # ML
@@ -41,7 +41,11 @@ class BreastCancerSegmentator(BaseModel):
         if summary_mode == "tensorboard":
             self.cp_dir = cp_dir
             self.run_dir = run_dir
-        self.writer, self.run_dir, self.cp_dir = self._initialize_writer()
+            self.writer, self.run_dir, self.cp_dir = self._initialize_writer()
+        elif summary_mode == "none":
+            pass
+        else:
+            raise NotImplementedError
 
         # faster convolutions, but more memory
         cudnn.benchmark = cudnn_benchmark
@@ -75,6 +79,7 @@ class BreastCancerSegmentator(BaseModel):
               save_cp: bool = True,
               evaluation_interval: int = 10,
               evaluate_train: bool = False,
+              train_metadata: Optional[dict] = None,
               scheduler_params: Optional[dict] = None,
               criterion_params: Optional[dict] = None,
               optimizer_params: Optional[dict] = None):
@@ -105,7 +110,7 @@ class BreastCancerSegmentator(BaseModel):
                            optimizer=optimizer,
                            lr_scheduler=lr_scheduler,
                            criterion=criterion)
-        self.writer.totals(hparam_dict, {})
+        self.writer.totals(hparam_dict, {}, train_metadata)
 
         for epoch in trange(epochs, desc="Training epochs", total=epochs, position=0, leave=True):
             epoch_loss = self._train_one_epoch(dataloader_train=dataloader_train,
@@ -121,25 +126,28 @@ class BreastCancerSegmentator(BaseModel):
 
             if epoch % evaluation_interval == 0 and epoch != 0:
                 if dataloader_val is not None:
-                    self.evaluate(eval_loader=dataloader_val, criterion=criterion, tensorboard_metric_mode="val")
+                    totals = self.evaluate(eval_loader=dataloader_val, criterion=criterion, tensorboard_metric_mode="val")
+                    logging.info(f"Validation totals for epoch {epoch}: {totals}")
                     self.predict(prediction_loader=dataloader_val,
-                                 out_layer_name=out_layer_name)
+                                 out_layer_name=out_layer_name,
+                                 )
 
                 if evaluate_train is True:
-                    self.evaluate(eval_loader=dataloader_train, criterion=criterion, tensorboard_metric_mode="train")
-
+                    totals = self.evaluate(eval_loader=dataloader_train, criterion=criterion, tensorboard_metric_mode="train")
+                    logging.info(f"Training totals for epoch {epoch}: {totals}")
                 if save_cp:
                     self._save_checkpoint()
 
         if dataloader_val is not None:
             last_eval_score = self.evaluate(eval_loader=dataloader_val, criterion=criterion,
                                             tensorboard_metric_mode="val")
+            logging.info(f"Validation totals for epoch {epoch}: {last_eval_score}")
         else:
             last_eval_score = None
 
         if evaluate_train is True:
-            self.evaluate(eval_loader=dataloader_train, criterion=criterion, tensorboard_metric_mode="train")
-
+            totals = self.evaluate(eval_loader=dataloader_train, criterion=criterion, tensorboard_metric_mode="train")
+            logging.info(f"Training totals for epoch {epoch}: {totals}")
         if save_cp:
             self._save_checkpoint()
         # self.writer.graph(self.model, dataloader_val, self.device)  # get model graph
@@ -156,7 +164,12 @@ class BreastCancerSegmentator(BaseModel):
 
         self.writer.close()
 
-    def cv(self, *, dataloader_train, dataloader_val, train_config, cross_val_config):
+    def cv(self,
+           *,
+           dataloader_train: DataLoader,
+           dataloader_val: DataLoader,
+           train_config: Dict,
+           cross_val_config: Dict):
         # TODO: check out Skorch for smarter cross-validation
 
         train_default_hparams = dict(
@@ -191,8 +204,7 @@ class BreastCancerSegmentator(BaseModel):
                 batch_size: int = 1,
                 out_layer_name: str = "sigmoid",
                 tensorboard_verbose: bool = True,
-                sample_batch: Optional[int] = 10) -> Dict[
-        str, Any]:
+                sample_batch: Optional[int] = 10) -> Dict[str, Any]:
         """
         Predict mask
         """
@@ -209,11 +221,12 @@ class BreastCancerSegmentator(BaseModel):
                 imgs_tensor = imgs.to(device=self.device, dtype=torch.float32)
                 pred_masks = self.model(imgs_tensor)
                 pred_masks = out_layer(pred_masks)
+                pred_masks = torch.where(pred_masks.cpu() > out_threshold, torch.tensor(1), torch.tensor(0)).to(dtype=torch.float32)
 
                 prediction_dict['all_images'].append(imgs.cpu())
                 # [mask_benign, mask_malignent, mask_background]
                 prediction_dict['all_truth_masks'].append(true_masks)
-                prediction_dict['all_pred_masks'].append(pred_masks.cpu())
+                prediction_dict['all_pred_masks'].append(pred_masks)
                 prediction_dict['classnames'].append(classnames)
 
                 # if there is a sample break
@@ -221,17 +234,17 @@ class BreastCancerSegmentator(BaseModel):
                     break
 
         if tensorboard_verbose is True:
-            self.writer.predict(prediction_dict, self.model_step)
+            self.writer.predict(prediction_dict, model_step=self.model_step)
 
         return prediction_dict
 
     @prevent_oom_error
     def evaluate(self,
                  eval_loader: DataLoader,
-                 criterion,
+                 criterion: Any,
                  threshold: float = 0.5,
                  tensorboard_verbose: bool = True,
-                 tensorboard_metric_mode: str = "val"):
+                 tensorboard_metric_mode: str = "val") -> Dict:
 
         multiple_metrics = defaultdict(list)
 
@@ -282,7 +295,7 @@ class BreastCancerSegmentator(BaseModel):
         return epoch_loss
 
     @prevent_oom_error
-    def _train_single_batch(self, imgs, masks_ground_truth, optimizer, criterion):
+    def _train_single_batch(self, imgs: torch.Tensor, masks_ground_truth: torch.Tensor, optimizer, criterion) -> float:
         masks_pred = self.model(imgs)
         masks_ground_truth = masks_ground_truth.type_as(masks_pred)  # in other case BCELoss gets error
 
@@ -297,14 +310,14 @@ class BreastCancerSegmentator(BaseModel):
 
         return loss
 
-    def _load_pretrained_model(self, pretrained_model_path):
+    def _load_pretrained_model(self, pretrained_model_path: str):
         model_dict = self.model.state_dict()
         pretrained_dict = torch.load(pretrained_model_path)
         pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dict}
         model_dict.update(pretrained_dict)
         self.model.load_state_dict(model_dict)
 
-    def _get_tensorboard_dir(self):
+    def _get_tensorboard_dir(self) -> Tuple[str, str]:
         converted_timestamp = get_converted_timestamp()
 
         run_dir = os.path.join(self.run_dir, converted_timestamp)
@@ -312,7 +325,7 @@ class BreastCancerSegmentator(BaseModel):
 
         return run_dir, cp_dir
 
-    def _initialize_writer(self):
+    def _initialize_writer(self) -> Tuple[Any, str, str]:
         if self.summary_mode == "tensorboard":
             current_runs_dir, current_cp_dir = self._get_tensorboard_dir()
             writer = UnetSummaryWriter(log_dir=current_runs_dir)
@@ -330,7 +343,7 @@ class BreastCancerSegmentator(BaseModel):
                    model_dir)
         logging.info(f'Checkpoint {self.model_step + 1} saved !')
 
-    def _init_model(self, model_params, pretrained_model_path):
+    def _init_model(self, model_params: Dict, pretrained_model_path: str):
         # model
         self.model = UNet(**model_params)
         # load pretrained dict

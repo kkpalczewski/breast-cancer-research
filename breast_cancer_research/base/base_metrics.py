@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 import torch.nn as nn
 import torch
-from typing import List
 
 class BaseMetrics(ABC):
     @abstractmethod
@@ -12,8 +11,9 @@ class BaseMetrics(ABC):
     def evaluate(self, *args, **kwargs):
         pass
 
-    @classmethod
-    def _get_activation(cls, activation_name):
+    @staticmethod
+    def get_activation(activation_name):
+        #TODO: refactror so that it could be merged with BaseModel.get_out_layer
         if activation_name == "softmax":
             activation = nn.Softmax(dim=1)
         else:

@@ -17,6 +17,7 @@ def main():
     parser.add_argument('--unet_config_path', type=str, help='path to unet config')
     parser.add_argument('--train_metadata_path', type=str, help='path to train metadata')
     parser.add_argument('--val_metadata_path', type=str, default=None, help='path to val metadata')
+    parser.add_argument('--cross_validation', action='store_true', help='perform cross validation')
     args = parser.parse_args()
 
     logger = logging.getLogger(__name__)
@@ -39,14 +40,22 @@ def main():
     else:
         metadata_val = None
 
+    # additional metadata for tensorboard
+    train_metadata = {
+        'dataset/batch_size': dataset_config['batch_size'],
+        'dataset/training_transforms_name': dataset_config['training_transforms_name'],
+        'dataset/scale': dataset_config['scale'],
+    }
+
     # get dataset
     dataset_train = UnetDataset(metadata_train,
                                 root=dataset_config["root"],
-                                scale=dataset_config["scale"])
+                                scale=dataset_config["scale"],
+                                training_transforms_name=dataset_config["training_transforms_name"])
     dataloader_train = DataLoader(dataset_train,
                                   batch_size=dataset_config["batch_size"],
                                   shuffle=True,
-                                  num_workers=8,
+                                  num_workers=0,
                                   pin_memory=True)
     if metadata_val is not None:
         dataset_val = UnetDataset(metadata_val,
@@ -55,7 +64,7 @@ def main():
         dataloader_val = DataLoader(dataset_val,
                                     batch_size=1,
                                     shuffle=False,
-                                    num_workers=8,
+                                    num_workers=0,
                                     pin_memory=True)
     else:
         dataloader_val = None
@@ -63,11 +72,19 @@ def main():
     #get model
     unet = BreastCancerSegmentator(**model_config)
 
-    # perform cross-validation
-    unet.cv(dataloader_train=dataloader_train,
-            dataloader_val=dataloader_val,
-            train_config=train_config,
-            cross_val_config=cross_val_config)
+    if args.cross_validation is True:
+        logging.info("Begin in cross validation mode...")
+        # perform cross-validation
+        unet.cv(dataloader_train=dataloader_train,
+                dataloader_val=dataloader_val,
+                train_config=train_config,
+                cross_val_config=cross_val_config)
+    else:
+        logging.info("Begin in training mode...")
+        unet.train(dataloader_train=dataloader_train,
+                     dataloader_val=dataloader_val,
+                     train_metadata=train_metadata,
+                     **train_config)
 
 
 if __name__ == "__main__":

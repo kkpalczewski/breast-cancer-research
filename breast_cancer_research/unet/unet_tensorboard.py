@@ -4,6 +4,7 @@ import logging
 import torch
 from breast_cancer_research.utils.visualize import overlay_mask
 
+
 class UnetSummaryWriter(SummaryLogger):
     def __init__(self, log_dir: Optional[str] = None, comment: Optional[str] = None):
         super().__init__(log_dir=log_dir, comment=comment)
@@ -33,12 +34,26 @@ class UnetSummaryWriter(SummaryLogger):
                 benign_img = overlay_mask(tensor_img=img_tensor,
                                           tensor_masks=torch.stack([pred_masks[0], ground_truth_masks[0]]),
                                           classnames=[classname[0][0], classname[0][0] + "_ground_truth"])
+
                 self.add_image(f'{all_steps}/benign', benign_img, model_step, dataformats='HWC')
 
                 malignant_img = overlay_mask(tensor_img=img_tensor,
-                                          tensor_masks=torch.stack([pred_masks[1], ground_truth_masks[1]]),
-                                          classnames=[classname[1][0], classname[1][0] + "_ground_truth"])
+                                             tensor_masks=torch.stack([pred_masks[1], ground_truth_masks[1]]),
+                                             classnames=[classname[1][0], classname[1][0] + "_ground_truth"])
                 self.add_image(f'{all_steps}/malignant', malignant_img, model_step, dataformats='HWC')
+
+                # TODO: delete after debugging
+                self.add_image(f'{all_steps}/background1', pred_masks[2].view(list(pred_masks[2].shape)+[1]), dataformats='HWC')
+                self.add_image(f'{all_steps}/benign1', pred_masks[0].view(list(pred_masks[0].shape)+[1]), dataformats='HWC')
+                self.add_image(f'{all_steps}/malignant1', pred_masks[1].view(list(pred_masks[1].shape)+[1]), dataformats='HWC')
+
+                self.add_image(f'{all_steps}/gt_background1', ground_truth_masks[2].view(list(ground_truth_masks[2].shape) + [1]),
+                               dataformats='HWC')
+                self.add_image(f'{all_steps}/gt_benign1', ground_truth_masks[0].view(list(ground_truth_masks[0].shape) + [1]),
+                               dataformats='HWC')
+                self.add_image(f'{all_steps}/gt_malignant1', ground_truth_masks[1].view(list(ground_truth_masks[1].shape) + [1]),
+                               dataformats='HWC')
+
 
                 if sample_batch and sample_batch == all_steps:
                     break

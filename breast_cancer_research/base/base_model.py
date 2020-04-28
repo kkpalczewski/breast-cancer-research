@@ -8,6 +8,7 @@ import torch
 import torch.optim as optim
 from itertools import product
 
+
 class BaseModel(ABC):
     @abstractmethod
     def train(self, *args, **kwargs):
