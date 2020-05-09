@@ -32,6 +32,18 @@ class BaseDataset(Dataset, ABC):
                 A.PadIfNeeded(min_height=new_size[0], min_width=new_size[1], border_mode=cv2.BORDER_CONSTANT,
                               value=np.random.randint(2), p=0.25),
                 A.Resize(height=new_size[0], width=new_size[1])])
+        elif transform_name == "ResnetFlipCropResize":
+            full_transforms = A.Compose([
+                A.HorizontalFlip(),
+                A.Resize(224, 224),
+                A.CenterCrop(height=int(224 * center_crop_factor), width=int(224 * center_crop_factor),
+                             p=0.25),
+                A.PadIfNeeded(min_height=224, min_width=224, border_mode=cv2.BORDER_CONSTANT,
+                              value=np.random.randint(2), p=0.25),
+                A.Resize(224, 224),
+                A.Normalize(mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225])
+            ])
         elif transform_name == "ResnetEval":
             full_transforms = A.Compose([
                 A.Resize(224, 224),

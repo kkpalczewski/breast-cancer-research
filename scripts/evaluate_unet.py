@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Check model predictions')
+    parser = argparse.ArgumentParser(description='Evaluate UNet')
     parser.add_argument('--unet_config_path', type=str, help='path to model config')
     parser.add_argument('--metadata_path', type=str, help='path to metadata')
     parser.add_argument('--predict_images', action='store_true', help='if set, sample predictions would '

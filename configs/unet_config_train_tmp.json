@@ -1,0 +1,46 @@
+{
+  "inference_params": {
+      "model_params": {
+      "n_channels": 1,
+      "n_classes": 3
+    },
+    "device": "cuda",
+    "pretrained_model_path": null
+  },
+  "dataset_params": {
+    "root": "/media/krzysztof/ADATA_HD700/Breast_cancer_sample_merged/CBIS-DDSM",
+    "scale": 0.5,
+    "batch_size": 1,
+    "sample": null,
+    "training_transforms_name": "UnetFlipCropResize"
+  },
+  "training_params": {
+    "save_cp": true,
+    "evaluate_train": false,
+    "epochs": 200,
+    "evaluation_interval": 25,
+    "criterion_params": {
+      "name": "dice",
+      "eval_threshold": 0.5,
+      "smooth": 1e-6,
+      "weights": [10, 10, 1],
+      "beta": 4
+    },
+    "scheduler_params": {
+      "name": "StepLR",
+      "step_size": 50,
+      "gamma": 0.5
+    },
+    "optimizer_params": {
+      "name": "Adam",
+      "lr": 0.0005
+    }
+  },
+  "cross_val_params": {
+    "scheduler_params": {
+      "step_size": [50],
+      "gamma": [0.9]
+  }
+  }
+}
+

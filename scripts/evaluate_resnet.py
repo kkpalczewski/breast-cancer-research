@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Check model predictions')
+    parser = argparse.ArgumentParser(description='Evaluate ResNet')
     parser.add_argument('--resnet_config_path', type=str, help='path to resnet config')
     parser.add_argument('--val_metadata_path', type=str, help='path to val metadata')
     parser.add_argument('--unet_config_path', type=str, default=None, help='path to unet config (has to include path '

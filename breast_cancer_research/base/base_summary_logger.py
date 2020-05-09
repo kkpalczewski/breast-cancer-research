@@ -70,6 +70,8 @@ class SummaryLogger(SummaryWriter, ABC):
                 hparam_dict['crit/weights'] = str(hparam_dict['criterion'].weights.cpu().numpy())
             if hasattr(hparam_dict['criterion'], 'smooth'):
                 hparam_dict['crit/smooth'] = str(hparam_dict['criterion'].smooth.cpu().numpy())
+            if hasattr(hparam_dict['criterion'], 'beta'):
+                hparam_dict['crit/beta'] = str(hparam_dict['criterion'].beta)
             hparam_dict['crit/class_name'] = type(hparam_dict['criterion']).__name__
             del hparam_dict['criterion']
 

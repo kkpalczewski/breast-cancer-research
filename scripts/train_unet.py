@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Check model predictions')
+    parser = argparse.ArgumentParser(description='Train UNet')
     parser.add_argument('--unet_config_path', type=str, help='path to unet config')
     parser.add_argument('--train_metadata_path', type=str, help='path to train metadata')
     parser.add_argument('--val_metadata_path', type=str, default=None, help='path to val metadata')

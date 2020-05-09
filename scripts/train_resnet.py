@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.DEBUG)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Check model predictions')
+    parser = argparse.ArgumentParser(description='Train ResNet')
     parser.add_argument('--resnet_config_path', type=str, help='path to resnet config')
     parser.add_argument('--train_metadata_path', type=str, help='path to train metadata')
     parser.add_argument('--cross_validation', action='store_true', help='perform cross validation')
@@ -93,7 +93,7 @@ def main():
         'dataset/batch_size': dataset_config['batch_size'],
     }
 
-    if "pretrained_model_path" in [*unet_model_config.keys()]:
+    if unet_model_config is not None and "pretrained_model_path" in [*unet_model_config.keys()]:
         train_metadata['dataset/pretrained_model_path'] = unet_model_config["pretrained_model_path"]
 
     if args.cross_validation is True:

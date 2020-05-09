@@ -1,93 +1,72 @@
 import pandas as pd
 import os
 import logging
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from pathlib import Path
 import pydicom as dicom
 import imageio
 import numpy as np
 from sklearn.model_selection import train_test_split
 
-def train_val_test_split(path_to_metadata, destination_folder, train_size=0.5, val_size=0.25, test_size=0.25, random_state=42, verbose=False):
+def train_val_test_split(metadata, default_split: Optional[pd.DataFrame] = None,
+                         train_size: Optional[float]=0.5, val_size: Optional[float] =0.25, test_size: Optional[float]=0.25,
+                         random_state=42, stratify_cols: List[str] = ('image_view', 'benign_findings', 'malignant_findings', 'subtlety',
+                                                      'breast_density')):
     """
-    Script which split metadata to train, validation and test split. It preserve equal (when possible) ratio of data from classes:
-    - image view
-    - left or right breast
-    - subtlety
-    - pathology
-    - breast density
-
+    Script which split metadata to train, validation and test split. It preserve equal (when possible) ratio of data from classes [default]:
+    image view, left or right breast, subtlety, benign findings, malignant findings, breast density
     """
-    #TODO: rewrite script so that it would accept any number of columns to make redistributed split
+    assert default_split is not None or train_size is not None, f"default_split or train_size have to be specified"
 
-    if train_size+val_size+test_size != 1:
-        raise Exception("Ratio of train, validation and test set doesn't add up to 1")
+    if default_split is not None:
+        merged_metadata_png = pd.merge(metadata, default_split, on=["patient_id", "image_view", "left_or_right_breast"])
+        train_split = merged_metadata_png[merged_metadata_png["train_val_test_split"] == "train"].drop(columns=["train_val_test_split"])
+        val_split = merged_metadata_png[merged_metadata_png["train_val_test_split"] == "val"].drop(columns=["train_val_test_split"])
+        test_split = merged_metadata_png[merged_metadata_png["train_val_test_split"] == "test"].drop(columns=["train_val_test_split"])
+    else:
+        stratify_cols = list(stratify_cols)
+        if val_size is None and test_size is None:
+            val_split = None
+            train_split, test_split = train_test_split(metadata, train=train_size, stratify=metadata[stratify_cols],
+                                                       shuffle=True, random_state=random_state)
+        elif test_size is not None and val_size is None:
+            #assert train_size + test_size == 1, f"Ratio of train: {train_size} and test set: {test_size} doesn't add up to 1"
+            val_split = None
+            train_split, test_split = train_test_split(metadata, train_size=train_size, test_size=test_size, stratify=metadata[stratify_cols],
+                                                       shuffle=True, random_state=random_state)
+        elif test_size is not None and val_size is not None:
+            #assert train_size+val_size+test_size == 1, "Ratio of train, validation and test set doesn't add up to 1"
+            train_split, val_test_split = train_test_split(metadata, test_size=test_size+val_size, stratify=metadata[stratify_cols],
+                                                           shuffle=True, random_state=random_state)
+            val_split, test_split = train_test_split(val_test_split, test_size=test_size/(test_size+val_size), stratify=val_test_split[stratify_cols],
+                                                     shuffle=True, random_state=random_state)
+        else:
+            raise ValueError(f"Val split: {val_size} specified, but train split was not sepcified")
 
-    metadata = pd.read_csv(path_to_metadata)
-    image_view_col = metadata["image_view"].unique()
-    left_or_right_breast_col = metadata["left_or_right_breast"].unique()
-    subtlety_col = metadata["subtlety"].unique()
-    pathology_col = metadata["pathology"].unique()
-    breast_density_col = metadata["breast_density"].unique()
+    return train_split, val_split, test_split
 
-    train_array = []
-    val_array = []
-    test_array = []
-
-    #iterate through every needed column and make split in every of those
-    for image_view in image_view_col:
-        for left_or_right_breast in left_or_right_breast_col:
-            for subtlety in subtlety_col:
-                for pathology in pathology_col:
-                    for breast_density in breast_density_col:
-                        tmp_metadata = metadata[((metadata["image_view"]==image_view) &
-                                                (metadata["left_or_right breast"]==left_or_right_breast) &
-                                                (metadata["subtlety"]==subtlety) &
-                                                (metadata["pathology"]==pathology) &
-                                                (metadata["breast_density"]==breast_density))]["image_file_path"]
-                        if tmp_metadata.shape[0] > 1:
-                            tmp_train, tmp_test, _, _ = train_test_split(tmp_metadata, tmp_metadata, test_size=test_size, random_state=random_state)
-                            if tmp_train.shape[0] > 1:
-                                tmp_train, tmp_val, _, _ = train_test_split(tmp_train, tmp_train, test_size=val_size/(1-test_size),
-                                                                            random_state=random_state)
-                                train_array.extend(list(tmp_train))
-                                val_array.extend(list(tmp_val))
-                                test_array.extend(list(tmp_test))
-                            else:
-                                train_array.extend(list(tmp_train))
-                                test_array.extend(list(tmp_test))
-                        elif tmp_metadata.shape[0] == 1:
-                            tmp_train=tmp_metadata
-                            train_array.extend(list(tmp_train))
-
-    #save splitted data
-    train_df = metadata[metadata["image file path"].isin(train_array)]
-    val_df = metadata[metadata["image file path"].isin(val_array)]
-    test_df = metadata[metadata["image file path"].isin(test_array)]
-
-    print(f"STATISTICS:\n"
-          "train size: {len(train_array)/all_records_size}, "
-          "validation size: {len(val_array)/all_records_size}, "
-          "test size: {len(test_array)/all_records_size)}")
-
-    return train_df, val_df, test_df
-
-def dcm_2_png(source_metadata: pd.DataFrame, in_dcm_dir: str, out_png_dir: str):
+def dcm_2_png(source_metadata: pd.DataFrame, in_dcm_dir: str, out_png_dir: str, sample: Optional[int] = None):
     new_metadata = pd.DataFrame()
 
+    i = 0
     for idx1, single_scan_df in source_metadata.groupby(["patient_id", "image_view", "left_or_right_breast"]):
         image_path = os.path.join(in_dcm_dir, single_scan_df.iloc[0]['image_file_path'])
         if not os.path.isfile(image_path):
-            logging.info(f"Image in path {image_path} doesn't exist. Skip file ...")
+            logging.debug(f"Image in path {image_path} doesn't exist. Skip file ...")
             continue
 
         single_scan_metadata = single_scan_df.iloc[0]
 
         # transform img
-        image_png = dicom.dcmread(image_path).pixel_array
+        try:
+            image_png = dicom.dcmread(image_path).pixel_array
+        except ValueError as e:
+            logging.warning(f"Image {image_path} corrupted: {e}")
+            continue
+
         scan_shape = image_png.shape
-        single_scan_metadata["image_file_path"] = Path(single_scan_metadata["image_file_path"]).parent / "scan.png"
-        image_png_path = os.path.join(out_png_dir, single_scan_metadata["image_file_path"])
+        single_scan_metadata["image file path"] = Path(single_scan_metadata["image_file_path"]).parent / "scan.png"
+        image_png_path = os.path.join(out_png_dir, single_scan_metadata["image file path"])
         if not os.path.isfile(image_png_path):
             Path(image_png_path).parent.mkdir(parents=True, exist_ok=True)
             imageio.imsave(image_png_path, image_png)
@@ -102,7 +81,11 @@ def dcm_2_png(source_metadata: pd.DataFrame, in_dcm_dir: str, out_png_dir: str):
             if not os.path.isfile(possible_mask_full_path):
                 logging.debug(f"Mask: {possible_mask_full_path} does not exist")
                 continue
-            potential_mask = dicom.dcmread(possible_mask_full_path).pixel_array
+            try:
+                potential_mask = dicom.dcmread(possible_mask_full_path).pixel_array
+            except ValueError as e:
+                logging.warning(f"Mask {possible_mask_full_path} corrupted: {e}")
+                continue
             if potential_mask.shape != scan_shape:
                 continue
             else:
@@ -111,9 +94,9 @@ def dcm_2_png(source_metadata: pd.DataFrame, in_dcm_dir: str, out_png_dir: str):
             single_scan_metadata['benign_findings'] = True
         else:
             single_scan_metadata['benign_findings'] = False
-        single_scan_metadata["roi_benign_path"] = Path(
+        single_scan_metadata["ROI benign path"] = Path(
             single_scan_metadata["image_file_path"]).parent / "benign_mask.png"
-        imageio.imsave(os.path.join(out_png_dir, single_scan_metadata["roi_benign_path"]), benign_mask)
+        imageio.imsave(os.path.join(out_png_dir, single_scan_metadata["ROI benign path"]), benign_mask)
 
         # get malignant masks
         malignant_df = single_scan_df[single_scan_df.pathology == 1]
@@ -125,7 +108,12 @@ def dcm_2_png(source_metadata: pd.DataFrame, in_dcm_dir: str, out_png_dir: str):
             if not os.path.isfile(possible_mask_full_path):
                 logging.debug(f"Mask: {possible_mask_full_path} does not exist")
                 continue
-            potential_mask = dicom.dcmread(possible_mask_full_path).pixel_array
+            try:
+                potential_mask = dicom.dcmread(possible_mask_full_path).pixel_array
+            except ValueError as e:
+                logging.warning(f"Mask {possible_mask_full_path} corrupted: {e}")
+                continue
+
             if potential_mask.shape != scan_shape:
                 continue
             else:
@@ -134,14 +122,21 @@ def dcm_2_png(source_metadata: pd.DataFrame, in_dcm_dir: str, out_png_dir: str):
             single_scan_metadata['malignant_findings'] = True
         else:
             single_scan_metadata['malignant_findings'] = False
-        single_scan_metadata["roi_malignant_path"] = Path(
+        single_scan_metadata["ROI malignant path"] = Path(
             single_scan_metadata["image_file_path"]).parent / "malignant_mask.png"
-        imageio.imsave(os.path.join(out_png_dir, single_scan_metadata["roi_malignant_path"]), malignant_mask)
+        imageio.imsave(os.path.join(out_png_dir, single_scan_metadata["ROI malignant path"]), malignant_mask)
 
         # drop not unused columns
         single_scan_metadata.drop(labels=['cropped_image_file_path', 'ROI_mask_file_path'], inplace=True)
 
+        logging.debug(f"Added to metadata: {image_png_path}")
+
         new_metadata = new_metadata.append(single_scan_metadata)
+
+        i += 1
+        logging.debug(f"{i} sample")
+        if sample is not None and sample <= i:
+            break
 
     return new_metadata
 
@@ -149,7 +144,7 @@ def dcm_2_png(source_metadata: pd.DataFrame, in_dcm_dir: str, out_png_dir: str):
 def instance_2_semantic_metadata(source_metadata_dir: str,
                                  columns: List[str] = ('patient_id', 'image_view', 'left_or_right_breast',
                                                        'pathology', 'subtlety', 'image_file_path',
-                                                       'ROI_mask_file_path', 'cropped_image_file_path')) -> \
+                                                       'ROI_mask_file_path', 'cropped_image_file_path', 'breast_density')) -> \
         Tuple[pd.DataFrame, str]:
     """
     Prepare metadata for new model and NYU model
@@ -166,7 +161,7 @@ def instance_2_semantic_metadata(source_metadata_dir: str,
     all_metadata['pathology'].replace(['BENIGN', 'BENIGN_WITHOUT_CALLBACK', 'MALIGNANT'], [0, 0, 1], inplace=True)
     tmp_metadata = all_metadata.copy()
     all_metadata = all_metadata.groupby(['patient_id', 'image_view', 'left_or_right_breast'],
-                                        as_index=False)['subtlety', 'pathology'].max()
+                                        as_index=False)[['subtlety', 'pathology']].max()
 
     tmp_columns = columns
     for col in ['subtlety', 'pathology']:
@@ -178,25 +173,11 @@ def instance_2_semantic_metadata(source_metadata_dir: str,
 
     all_metadata.sort_values(by='patient_id', inplace=True)
 
-    # delet new lines signs
+    # delete new lines signs
     all_metadata[['image_file_path', 'ROI_mask_file_path', 'cropped_image_file_path']] = \
         all_metadata[['image_file_path', 'ROI_mask_file_path', 'cropped_image_file_path']].replace('\n', '', regex=True)
 
     return all_metadata
-
-
-def _create_png_img(image_path, metadata, idx, metadata_column_name, out_png_dir, desired_size=None):
-    image_png = dicom.dcmread(image_path).pixel_array
-
-    metadata.loc[idx, metadata_column_name] = str(metadata.loc[idx][metadata_column_name][:-3]) + "png"
-    image_png_path = os.path.join(out_png_dir, metadata.loc[idx][metadata_column_name])
-    if not os.path.isfile(image_png_path):
-        Path(image_png_path).parent.mkdir(parents=True, exist_ok=True)
-        imageio.imsave(image_png_path, image_png)
-        logging.debug(f"Saved img in path: {image_png_path}")
-
-    return metadata
-
 
 def _merge_metadata(source_metadata_dir: str, columns: List[str]) -> pd.DataFrame:
     all_metadata = pd.DataFrame(columns=columns)

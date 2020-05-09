@@ -48,15 +48,22 @@ class BinaryDiceLoss(nn.Module, BaseMetrics):
         for target_batch, pred_batch, weight in zip(targets, preds, self.weights):
             for target, pred in zip(target_batch, pred_batch):
                 dice_similarity = self.metric_dice_similarity(target, pred, self.smooth)
-                #dice_loss_with_weights += (torch.ones(1, device=self.device) - dice_similarity) * weight
-                dice_loss_with_weights += (torch.ones(1, device=self.device) - torch.pow(dice_similarity, 1/self.beta)) * weight
-
+                # classic dice loss
+                #dice_loss_with_weights += (torch.ones(1, devsssice=self.device) - dice_similarity) * weight
+                # focal loss wich prevents high rewards for empty predictions when target is empty
+                # if sum(target.contiguous().view(-1)).detach().cpu() != 0:
+                #     dice_loss_with_weights += (torch.ones(1, device=self.device) - torch.pow(dice_similarity, 1/self.beta)) * weight
+                # else:
+                #     dice_loss_with_weights += (torch.ones(1, device=self.device) - torch.pow(dice_similarity,
+                #                                                                              1 / self.beta)) * weight * 0.5
+                # focal loss
+                dice_loss_with_weights += (torch.ones(1, device=self.device) - torch.pow(dice_similarity, 1 / self.beta)) * weight
         if self.reduction == "mean":
             reduced_dice_loss = dice_loss_with_weights / len(targets[0]) / len(targets)
         elif self.reduction == "sum":
             reduced_dice_loss = dice_loss_with_weights
         else:
-            raise NotImplementedError(f"Reduction function {self.reduction} not implemented")
+            raise ValueError(f"Reduction function {self.reduction} not implemented")
 
         return reduced_dice_loss
 

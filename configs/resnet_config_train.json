@@ -13,29 +13,32 @@
     "root_img": "/home/kpalczew/CBIS_DDSM_2",
     "root_mask": "/home/kpalczew/CBIS_DDSM_2",
     "classes": ["benign_finding", "malignant_finding"],
-    "scale": 0.3,
+    "input_masks": false,
+    "scale": 0.5,
     "batch_size": 4,
-    "unet_config": null,
-    "sample": 10
+    "sample": null,
+    "training_transforms_name": null
   },
   "training_params": {
     "save_cp": true,
     "evaluate_train": true,
-    "epochs": 50,
-    "batch_sample": 200,
-    "evaluation_interval": 10,
-    "criterion_params": {},
+    "epochs": 200,
+    "batch_sample": null,
+    "evaluation_interval": 25,
+    "criterion_params": {
+      "name": "CrossEntropyLoss"
+    },
     "scheduler_params": {
       "name": "StepLR",
-      "step_size": 10,
+      "step_size": 50,
       "gamma": 0.5
     },
     "optimizer_params": {
       "name": "SGD",
-      "lr": 0.005
+      "lr": 0.0001
     }
   },
   "cross_val_params": {
-    "epochs": [100]
+    "epochs": [2000]
   }
 }

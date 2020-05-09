@@ -1,31 +1,34 @@
 {
   "inference_params": {
     "model_params": {
-    "n_channels": 1,
-    "n_classes": 3
-    },
-    "device": "cuda"
+      "n_channels": 1,
+      "n_classes": 3
+       },
+    "device": "cuda",
+    "pretrained_model_path": "/home/kpalczew/breast-cancer-research/checkpoints_unet/20200402/20200402_CP_epochs_50_unet.pth"
   },
   "dataset_params": {
     "root": "/home/kpalczew/CBIS_DDSM_2",
     "scale": 0.3,
-    "batch_size": 1
+    "batch_size": 2,
+    "training_transforms_name": null
   },
   "training_params": {
     "save_cp": true,
     "evaluate_train": true,
     "eval_mask_threshold": 0.5,
-    "epochs": 150,
-    "evaluation_interval": 10,
+    "epochs": 200,
+    "evaluation_interval": 100,
     "criterion_params": {
       "name": "dice",
       "eval_threshold": 0.5,
-      "weights": [10, 10, 1]
+      "smooth": 1e-6,
+      "weights": [5, 5, 1]
     },
     "scheduler_params": {
       "name": "StepLR",
-      "step_size": 10,
-      "gamma": 0.01
+      "step_size": 100,
+      "gamma": 0.1
     },
     "optimizer_params": {
       "name": "Adam",
@@ -33,15 +36,12 @@
     }
   },
   "cross_val_params": {
-    "epochs": [100],
+    "epochs": [2000],
     "optimizer_params": {
-      "lr": [0.005]
-    },
-    "criterion_params": {
-      "weights": [[10, 10, 1]]
+      "lr": [0.001]
     },
     "scheduler_params": {
-      "step_size": [25],
+      "step_size": [200],
       "gamma": [0.8]
   }
   }
