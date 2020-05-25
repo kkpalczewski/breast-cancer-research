@@ -7,20 +7,18 @@
 # python files
 __pycache__/
 
-# Jupyter Notebook
-*.ipynb_checkpoints
-
 # Labels
 *.xml
 
 # data folder
-/data
-
+data/labels_with_masks_benign_malignant
+data/sample_metadata
+data/semantic_labels
 #Pycharm folders
 /.idea
 
 #unused scripts
 #TODO: delete after development
-/test_scripts_and_unused
 /runs
 /checkpoints
+/tests

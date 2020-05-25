@@ -1,0 +1,45 @@
+{
+  "inference_params": {
+    "model_params": {
+      "model_name": "resnet",
+      "feature_extract": false,
+      "num_classes": 2,
+      "use_pretrained": true,
+      "pretrained_model_path": null
+    },
+    "device": "cuda"
+  },
+  "dataset_params": {
+    "root_img": "/home/kpalczew/CBIS_DDSM_2",
+    "root_mask": "/home/kpalczew/CBIS_DDSM_2",
+    "classes": ["benign_finding", "malignant_finding"],
+    "input_masks": true,
+    "scale": 0.5,
+    "batch_size": 4,
+    "sample": null,
+    "training_transforms_name": "ResnetFlipCropResize"
+  },
+  "training_params": {
+    "save_cp": true,
+    "evaluate_train": true,
+    "epochs": 2,
+    "get_graph": true,
+    "batch_sample": null,
+    "evaluation_interval": 25,
+    "criterion_params": {
+      "name": "CrossEntropyLoss"
+    },
+    "scheduler_params": {
+      "name": "StepLR",
+      "step_size": 50,
+      "gamma": 0.5
+    },
+    "optimizer_params": {
+      "name": "SGD",
+      "lr": 0.005
+    }
+  },
+  "cross_val_params": {
+    "epochs": [2000]
+  }
+}

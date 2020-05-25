@@ -1,0 +1,10 @@
+{
+  "downloaded_images_root": "/media/krzysztof/ADATA_HD700/Breast_cancer_DICOM_2/CBIS-DDSM",
+  "downloaded_metadata_dir": "../data/downloaded_labels",
+  "transform_dicom_to_png": true,
+  "sample": 1000,
+  "images_out_dir": "/media/krzysztof/ADATA_HD700/Breast_cancer_sample_merged/CBIS-DDSM",
+  "metadata_out_dir": "../data/semantic_labels",
+  "train_val_test_split": [0.5, 0.25, 0.25],
+  "default_split": "/home/krzysztof/Documents/Studia/Master_thesis/02_Source_code/breast-cancer-research/tests/default_split.csv"
+}
