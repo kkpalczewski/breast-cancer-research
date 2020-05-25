@@ -50,7 +50,7 @@ def dcm_2_png(source_metadata: pd.DataFrame, in_dcm_dir: str, out_png_dir: str, 
 
     i = 0
     for idx1, single_scan_df in source_metadata.groupby(["patient_id", "image_view", "left_or_right_breast"]):
-        image_path = os.path.join(in_dcm_dir, single_scan_df.iloc[0]['image_file_path'])
+        image_path = os.path.join(in_dcm_dir, single_scan_df.iloc[0]['image file path'])
         if not os.path.isfile(image_path):
             logging.debug(f"Image in path {image_path} doesn't exist. Skip file ...")
             continue
@@ -65,7 +65,7 @@ def dcm_2_png(source_metadata: pd.DataFrame, in_dcm_dir: str, out_png_dir: str, 
             continue
 
         scan_shape = image_png.shape
-        single_scan_metadata["image file path"] = Path(single_scan_metadata["image_file_path"]).parent / "scan.png"
+        single_scan_metadata["image file path"] = Path(single_scan_metadata["image file path"]).parent / "scan.png"
         image_png_path = os.path.join(out_png_dir, single_scan_metadata["image file path"])
         if not os.path.isfile(image_png_path):
             Path(image_png_path).parent.mkdir(parents=True, exist_ok=True)
@@ -95,7 +95,7 @@ def dcm_2_png(source_metadata: pd.DataFrame, in_dcm_dir: str, out_png_dir: str, 
         else:
             single_scan_metadata['benign_findings'] = False
         single_scan_metadata["ROI benign path"] = Path(
-            single_scan_metadata["image_file_path"]).parent / "benign_mask.png"
+            single_scan_metadata["image file path"]).parent / "benign_mask.png"
         imageio.imsave(os.path.join(out_png_dir, single_scan_metadata["ROI benign path"]), benign_mask)
 
         # get malignant masks
@@ -123,7 +123,7 @@ def dcm_2_png(source_metadata: pd.DataFrame, in_dcm_dir: str, out_png_dir: str, 
         else:
             single_scan_metadata['malignant_findings'] = False
         single_scan_metadata["ROI malignant path"] = Path(
-            single_scan_metadata["image_file_path"]).parent / "malignant_mask.png"
+            single_scan_metadata["image file path"]).parent / "malignant_mask.png"
         imageio.imsave(os.path.join(out_png_dir, single_scan_metadata["ROI malignant path"]), malignant_mask)
 
         # drop not unused columns
@@ -143,7 +143,7 @@ def dcm_2_png(source_metadata: pd.DataFrame, in_dcm_dir: str, out_png_dir: str, 
 
 def instance_2_semantic_metadata(source_metadata_dir: str,
                                  columns: List[str] = ('patient_id', 'image_view', 'left_or_right_breast',
-                                                       'pathology', 'subtlety', 'image_file_path',
+                                                       'pathology', 'subtlety', 'image file path',
                                                        'ROI_mask_file_path', 'cropped_image_file_path', 'breast_density')) -> \
         Tuple[pd.DataFrame, str]:
     """
@@ -174,8 +174,8 @@ def instance_2_semantic_metadata(source_metadata_dir: str,
     all_metadata.sort_values(by='patient_id', inplace=True)
 
     # delete new lines signs
-    all_metadata[['image_file_path', 'ROI_mask_file_path', 'cropped_image_file_path']] = \
-        all_metadata[['image_file_path', 'ROI_mask_file_path', 'cropped_image_file_path']].replace('\n', '', regex=True)
+    all_metadata[['image file path', 'ROI_mask_file_path', 'cropped_image_file_path']] = \
+        all_metadata[['image file path', 'ROI_mask_file_path', 'cropped_image_file_path']].replace('\n', '', regex=True)
 
     return all_metadata
 
@@ -199,7 +199,6 @@ def _merge_metadata(source_metadata_dir: str, columns: List[str]) -> pd.DataFram
         # rename other columns to remove spaces
         csv_metadata.rename(columns={"image view": "image_view",
                                      "left or right breast": "left_or_right_breast",
-                                     "image file path": "image_file_path",
                                      "ROI mask file path": "ROI_mask_file_path",
                                      "cropped image file path": "cropped_image_file_path"}, inplace=True)
 

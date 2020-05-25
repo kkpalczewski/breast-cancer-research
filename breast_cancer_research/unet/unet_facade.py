@@ -80,6 +80,7 @@ class BreastCancerSegmentator(BaseModel):
               evaluation_interval: int = 10,
               evaluate_train: bool = False,
               train_metadata: Optional[dict] = None,
+              get_graph: bool = False,
               scheduler_params: Optional[dict] = None,
               criterion_params: Optional[dict] = None,
               optimizer_params: Optional[dict] = None):
@@ -150,7 +151,9 @@ class BreastCancerSegmentator(BaseModel):
             logging.info(f"Training totals for epoch {epoch}: {totals}")
         if save_cp:
             self._save_checkpoint()
-        # self.writer.graph(self.model, dataloader_val, self.device)  # get model graph
+
+        if get_graph is True:
+            self.writer.graph(self.model, dataloader_val, self.device)  # get model graph
 
         metric_dict = dict(last_epoch_loss=epoch_loss,
                            last_eval_score=last_eval_score)

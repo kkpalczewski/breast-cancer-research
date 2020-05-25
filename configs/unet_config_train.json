@@ -10,21 +10,23 @@
   "dataset_params": {
     "root": "/home/kpalczew/CBIS_DDSM_2",
     "scale": 0.5,
-    "batch_size": 1,
+    "batch_size": 2,
     "sample": null,
     "training_transforms_name": "UnetFlipCropResize"
   },
   "training_params": {
     "save_cp": true,
     "evaluate_train": false,
+    "get_graph": false,
     "epochs": 200,
-    "evaluation_interval": 25,
+    "evaluation_interval": 20,
     "criterion_params": {
       "name": "dice",
       "eval_threshold": 0.5,
-      "smooth": 1e-6,
+      "smooth": 1,
       "weights": [10, 10, 1],
-      "beta": 4
+      "beta": 3,
+      "gamma":  0.5
     },
     "scheduler_params": {
       "name": "StepLR",

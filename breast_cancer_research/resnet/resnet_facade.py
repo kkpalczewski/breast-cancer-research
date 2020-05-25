@@ -70,6 +70,7 @@ class BreastCancerClassifier(BaseModel):
               optimizer_params: Optional[dict] = None,
               evaluation_interval: int = 10,
               evaluate_train: bool = True,
+              get_graph: bool = False,
               eval_mask_threshold: float = 0.5,
               train_metadata: Optional[dict] = None,
               multi_target: bool = False):
@@ -113,28 +114,29 @@ class BreastCancerClassifier(BaseModel):
 
             if epoch % evaluation_interval == 0 and epoch != 0:
                 if dataloader_val is not None:
-                    totals = self.evaluate(dataloader_val, criterion, tensorboard_metric_mode="val")
-                    logging.info(f"Validation totals for epoch {epoch}: {totals}")
+                    totals_val = self.evaluate(dataloader_val, criterion, tensorboard_metric_mode="val")
+                    logging.info(f"Validation totals for epoch {epoch}: {totals_val}")
                     self.predict(dataloader_val, multi_target=multi_target)
                 if evaluate_train is True:
-                    self.evaluate(dataloader_train, criterion, tensorboard_metric_mode="train")
-                    logging.info(f"Training totals for epoch {epoch}: {totals}")
+                    totals_train = self.evaluate(dataloader_train, criterion, tensorboard_metric_mode="train")
+                    logging.info(f"Training totals for epoch {epoch}: {totals_train}")
                 if save_cp:
                     self._save_checkpoint()
         # last eval
         if dataloader_val is not None:
-            last_eval_score = self.evaluate(dataloader_val, criterion, tensorboard_metric_mode="val")
-            logging.info(f"Validation totals for epoch {epoch}: {totals}")
+            last_eval_score_val = self.evaluate(dataloader_val, criterion, tensorboard_metric_mode="val")
+            logging.info(f"Validation totals for epoch {epoch}: {last_eval_score_val}")
             self.predict(dataloader_val, multi_target=multi_target)
         else:
             last_eval_score = None
         if evaluate_train is True:
-            self.evaluate(dataloader_train, criterion, tensorboard_metric_mode="train")
-            logging.info(f"Training totals for epoch {epoch}: {totals}")
+            last_eval_score_train = self.evaluate(dataloader_train, criterion, tensorboard_metric_mode="train")
+            logging.info(f"Training totals for epoch {epoch}: {last_eval_score_train}")
         if save_cp:
             self._save_checkpoint()
 
-        # self.writer.graph(self.model, dataloader_val, self.device)  # get model graph
+        if get_graph is True:
+            self.writer.graph(self.model, dataloader_val, self.device)  # get model graph
 
         self.writer.close()
 

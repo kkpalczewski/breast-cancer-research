@@ -36,7 +36,7 @@ class SummaryLogger(SummaryWriter, ABC):
     def graph(self, model, dataloader_val: DataLoader, device):
         # only for graph add
         for batch in dataloader_val:
-            imgs = batch['image']
+            imgs = batch[0]
             imgs = imgs.to(device=device, dtype=float32)
             break
 

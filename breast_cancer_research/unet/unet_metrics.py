@@ -11,7 +11,8 @@ class BinaryDiceLoss(nn.Module, BaseMetrics):
                  reduction: str = "mean",
                  eval_threshold: float = 0.5,
                  smooth: float = 1,
-                 beta: float = 2):
+                 beta: float = 2,
+                 gamma: float = 0.5):
 
         super().__init__()
 
@@ -26,6 +27,7 @@ class BinaryDiceLoss(nn.Module, BaseMetrics):
         self.eval_threshold = eval_threshold
         self.smooth = torch.tensor(smooth, device=device)
         self.beta = beta
+        self.gamma = gamma
 
     def forward(self, preds, targets):
         if not isinstance(targets, torch.Tensor):
@@ -50,14 +52,15 @@ class BinaryDiceLoss(nn.Module, BaseMetrics):
                 dice_similarity = self.metric_dice_similarity(target, pred, self.smooth)
                 # classic dice loss
                 #dice_loss_with_weights += (torch.ones(1, devsssice=self.device) - dice_similarity) * weight
-                # focal loss wich prevents high rewards for empty predictions when target is empty
-                # if sum(target.contiguous().view(-1)).detach().cpu() != 0:
-                #     dice_loss_with_weights += (torch.ones(1, device=self.device) - torch.pow(dice_similarity, 1/self.beta)) * weight
-                # else:
-                #     dice_loss_with_weights += (torch.ones(1, device=self.device) - torch.pow(dice_similarity,
-                #                                                                              1 / self.beta)) * weight * 0.5
                 # focal loss
-                dice_loss_with_weights += (torch.ones(1, device=self.device) - torch.pow(dice_similarity, 1 / self.beta)) * weight
+                # dice_loss_with_weights += (torch.ones(1, device=self.device) - torch.pow(dice_similarity, 1 / self.beta)) * weight
+                # focal loss wich prevents high rewards for empty predictions when target is empty
+                if torch.max(target) != 0:
+                    dice_loss_with_weights += (torch.ones(1, device=self.device) - torch.pow(dice_similarity, 1/self.beta)) * weight
+                else:
+                    dice_loss_with_weights += (torch.ones(1, device=self.device) - torch.pow(dice_similarity,
+                                                                                             1 / self.beta)) * (weight * self.gamma)
+
         if self.reduction == "mean":
             reduced_dice_loss = dice_loss_with_weights / len(targets[0]) / len(targets)
         elif self.reduction == "sum":

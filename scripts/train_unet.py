@@ -69,7 +69,7 @@ def main():
     else:
         dataloader_val = None
 
-    #get model
+    # get model
     unet = BreastCancerSegmentator(**model_config)
 
     if args.cross_validation is True:
@@ -82,9 +82,9 @@ def main():
     else:
         logging.info("Begin in training mode...")
         unet.train(dataloader_train=dataloader_train,
-                     dataloader_val=dataloader_val,
-                     train_metadata=train_metadata,
-                     **train_config)
+                   dataloader_val=dataloader_val,
+                   train_metadata=train_metadata,
+                   **train_config)
 
 
 if __name__ == "__main__":

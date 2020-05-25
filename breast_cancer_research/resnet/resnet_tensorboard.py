@@ -38,6 +38,8 @@ class ResnetSummaryWriter(SummaryLogger):
         for tp_or_fn, single_class_dict in prediction_dict.items():
             for class_name, img in single_class_dict.items():
                 batch_tensor = torch.stack(img)
+                batch_tensor = (batch_tensor*255).to(dtype=torch.uint8)
+
                 self.add_images(f'{tp_or_fn}/{class_name}', batch_tensor, model_step)
 
     def train(self):

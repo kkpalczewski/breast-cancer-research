@@ -71,21 +71,21 @@ class ResnetDataset(BaseDataset):
 
     def __getitem__(self, i: int) -> Tuple[torch.Tensor, torch.Tensor]:
         img = self._load_from_metadata(i, 'image file path', self.root_img, self.metadata)
-
         if self.input_masks is True:
             if self.unet is None:
-                img = self._uint16_2_uint8(img)
-                mask_malignant = self._load_from_metadata(i, 'ROI malignant path', self.root_mask, self.metadata).astype(
-                    np.uint8)
-                mask_benign = self._load_from_metadata(i, 'ROI benign path', self.root_mask, self.metadata).astype(np.uint8)
-
+                img = img.astype(np.float32)
+                img = (img.clip(10000, 50000) - 10000) / 40000
+                mask_malignant = (self._load_from_metadata(i, 'ROI malignant path', self.root_mask, self.metadata)/255).astype(
+                    img.dtype)
+                mask_benign = (self._load_from_metadata(i, 'ROI benign path', self.root_mask, self.metadata)/255).astype(img.dtype)
                 assert img.size == mask_benign.size == mask_malignant.size, \
                     f'Image and mask {i} should be the same size, but are different: img size -> {img.size}, ' \
                     f'benign size -> {mask_benign.size}, malignant size -> {mask_malignant.size}'
 
                 input_img = np.stack([img, mask_benign, mask_malignant], axis=2)
             else:
-                img = self._uint16_2_uint8(img)
+                img = img.astype(np.float32)
+                img = (img.clip(10000, 50000) - 10000) / 40000
                 img, _ = BaseDataset.transform_images_masks(img=img, transform=self.unet_transforms)
                 img = img.view([1] + list(img.shape))
                 with torch.no_grad():
@@ -95,7 +95,8 @@ class ResnetDataset(BaseDataset):
 
                 input_img = torch.cat([imgs_tensor, pred_masks[:, 0:2]], dim=1).cpu()[0].numpy()
         else:
-            img = self._uint16_2_uint8(img)
+            img = img.astype(np.float32)
+            img = (img.clip(10000, 50000) - 10000) / 40000
             dummy_mask_malignant = np.zeros(img.shape).astype(img.dtype)
             dummy_mask_benign = np.zeros(img.shape).astype(img.dtype)
             input_img = np.stack([img, dummy_mask_benign, dummy_mask_malignant], axis=2)

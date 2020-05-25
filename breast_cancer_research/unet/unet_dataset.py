@@ -52,8 +52,11 @@ class UnetDataset(BaseDataset):
 
     def __getitem__(self, i: int) -> Mapping[str, torch.Tensor]:
         img = self._load_from_metadata(i, 'image file path', self.root, self.metadata)
-        img = img.clip(10000, 50000)
-        img = cv2.normalize(img, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+
+        img = img.astype(np.float32)
+        img = (img.clip(10000, 50000) - 10000) / 40000
+
+        #img = cv2.normalize(img, None, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
 
         mask_malignant = self._load_from_metadata(i, 'ROI malignant path', self.root, self.metadata)
         mask_benign = self._load_from_metadata(i, 'ROI benign path', self.root, self.metadata)

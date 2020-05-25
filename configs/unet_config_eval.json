@@ -5,13 +5,13 @@
       "n_classes": 3
        },
     "device": "cuda",
-    "pretrained_model_path": "/home/kpalczew/breast-cancer-research/checkpoints_unet/20200402/20200402_CP_epochs_50_unet.pth"
+    "pretrained_model_path": "/home/kpalczew/breast-cancer-research/pretrained_models/unet.pth"
   },
   "dataset_params": {
     "root": "/home/kpalczew/CBIS_DDSM_2",
-    "scale": 0.3,
+    "scale": 0.5,
     "batch_size": 2,
-    "training_transforms_name": null
+    "training_transforms_name": "UnetFlipCropResize"
   },
   "training_params": {
     "save_cp": true,
