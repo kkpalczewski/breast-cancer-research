@@ -1,5 +1,5 @@
 # Computer-aid diagnosis (CADx) and detection (CADe) for breast cancer in mammography with combined UNet and ResNet
-
+![Screenshot from 2021-04-11 12-28-00](https://user-images.githubusercontent.com/19149734/114300702-e8cc4980-9ac1-11eb-876b-538b9d025ce6.png)
 ## Introduction
 This project aims to develop an approach which could improve current CADx, CADe performance in breast cancer assesment using mammography studies.
 Model has to parts: sementic segmentation (UNet) and classification part (ResNet). Both models are trained separetely, since there
